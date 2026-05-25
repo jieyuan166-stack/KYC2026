@@ -658,6 +658,7 @@ const initialFormData = {
       riskTolerance: "",
       additionalFacts: "",
       amountToInvest: "",
+      amountToInvestNotes: "",
       reasons: { guarantees: false, probate: false, creditor: false, other: false, otherText: "" },
       purpose: { savings: false, estate: false, retirement: false, resp: false, other: false, otherText: "" },
       timeHorizon: "",
@@ -1349,6 +1350,9 @@ const NonLeverageComplianceForm = ({ data, update, markManualNamePath = () => {}
         <TextArea value={d.additionalFacts} onChange={v=>set("additionalFacts",v)} rows={4}/>
       </Field>
       <Field label="Amount to invest ($)" required><TextInput type="number" value={d.amountToInvest} onChange={v=>set("amountToInvest",v)}/></Field>
+      <Field label="Amount to invest notes">
+        <TextArea value={d.amountToInvestNotes} onChange={v=>set("amountToInvestNotes",v)} rows={3} placeholder="Manual notes about price, amount, source, or allocation"/>
+      </Field>
 
       <div className="section-header-light">Need identification</div>
       <div className="grid md:grid-cols-3 gap-4">
@@ -2722,6 +2726,7 @@ const NonLeveragePdf = ({ nl }) => {
           <PdfField label="Risk tolerance" value={nl.riskTolerance}/>
           <PdfLongTextField label="Additional client facts (e.g., date of birth/age, occupation, dependants, financial obligations - assets, liabilities)" value={nl.additionalFacts} minHeight={74}/>
           <PdfFieldFull label="Amount to invest ($)" value={fmtMoney(nl.amountToInvest)}/>
+          {nl.amountToInvestNotes && <PdfLongTextField label="Amount to invest notes" value={nl.amountToInvestNotes} minHeight={42}/>}
         </PdfSection>
         <PdfSection title="Need identification">
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, alignItems: "stretch" }}>
@@ -3430,6 +3435,7 @@ const ReviewAndGeneratePDF = ({ data, goToStep }) => {
             <ReviewSummaryRow label="Investment knowledge" value={sf.nonLeverageCompliance.investmentKnowledge}/>
             <ReviewSummaryRow label="Risk tolerance" value={sf.nonLeverageCompliance.riskTolerance}/>
             <ReviewSummaryRow label="Amount to invest" value={sf.nonLeverageCompliance.amountToInvest ? `$${Number(sf.nonLeverageCompliance.amountToInvest).toLocaleString()}` : " - "}/>
+            {sf.nonLeverageCompliance.amountToInvestNotes && <div className="mt-1"><span className="text-xs font-semibold">Amount notes: </span><span className="text-xs">{sf.nonLeverageCompliance.amountToInvestNotes}</span></div>}
             <ReviewSummaryRow label="Time horizon" value={sf.nonLeverageCompliance.timeHorizon}/>
             <ReviewSummaryRow label="Risk profile" value={sf.nonLeverageCompliance.riskProfile}/>
             <ReviewSummaryRow label="Guarantee" value={sf.nonLeverageCompliance.guarantee}/>
