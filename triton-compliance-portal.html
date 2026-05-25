@@ -378,6 +378,13 @@ const AUTH_PASSWORD_HASH = "b4d892dcdd1c8a38a97f6cfcac5bf20075d10947cd9cde9d41e1
 const STORAGE_KEY_LEGACY = "triton_compliance_draft_v1";   // single object (kept for migration)
 const STORAGE_KEY        = "triton_compliance_drafts_v2";  // array of drafts
 const DEFAULT_ADVISOR_NAME = "Jie Yuan";
+const REASON_WHY_ACCOUNT_OPTIONS = [
+  { value: "RRSP", label: "RRSP" },
+  { value: "FHSA", label: "FHSA" },
+  { value: "TFSA Lump Sum", label: "TFSA Lump Sum" },
+  { value: "Non-Registered", label: "Non-Registered" },
+  { value: "Spousal RRSP", label: "Spousal RRSP" },
+];
 const todayISO = () => {
   const d = new Date();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -529,12 +536,18 @@ const makeDebtRow = (row = {}) => ({
   balance: row.balance || "",
   monthly: row.monthly || "",
 });
+const makeReasonWhy = (row = {}) => ({
+  include: row.include !== false,
+  accountType: row.accountType || "",
+});
 
 function normalizeFormData(formData) {
   const fd = deepClone(formData || initialFormDataRef.current || {});
   fd.smartFill = fd.smartFill || { manual: {}, lastPrimaryName: "", lastSpouseName: "" };
   fd.smartFill.manual = fd.smartFill.manual || {};
   fd.advisorDisclosure = fd.advisorDisclosure || {};
+  fd.segregatedFundInvestment = fd.segregatedFundInvestment || {};
+  fd.segregatedFundInvestment.reasonWhy = makeReasonWhy(fd.segregatedFundInvestment.reasonWhy);
   applyDefaultTodayDates(fd);
 
   const lc = fd.segregatedFundInvestment?.leverageCompliance;
@@ -704,6 +717,10 @@ const initialFormData = {
       advisorSignature: "", advisorDate: "",
     },
     selectedInsuranceCompany: "",
+    reasonWhy: {
+      include: true,
+      accountType: "",
+    },
     insuranceQuestionnaire: {
       manulife: {
         salutation: "", surname: "", firstName: "", initials: "",
@@ -2511,6 +2528,80 @@ const splitMultiLine = (text) => String(text || "")
 
 const fmtMoney = (v) => v ? `$${Number(v).toLocaleString()}` : "";
 const fmtDate = (v) => v || "";
+const fmtLongDate = (v) => {
+  const raw = v || todayISO();
+  const d = new Date(`${raw}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return raw;
+  return d.toLocaleDateString("en-CA", { year: "numeric", month: "long", day: "numeric" });
+};
+const companyDisplayName = (company) => company === "iA Financial" ? "iA FINANCIAL" : (company || "the selected insurance company");
+const reasonWhyLabel = (value) => REASON_WHY_ACCOUNT_OPTIONS.find(o => o.value === value)?.label || value || "";
+const parseGuarantee = (value) => {
+  const match = String(value || "").match(/(\d+)\s*\/\s*(\d+)/);
+  return match ? { maturity: match[1], death: match[2] } : null;
+};
+const guaranteeSentence = (guarantee) => {
+  const parsed = parseGuarantee(guarantee);
+  if (parsed) return `The contract provides a ${parsed.maturity}% Maturity Guarantee and a ${parsed.death}% Death Benefit Guarantee on your net deposits, subject to the terms of the Information Folder and Contract.`;
+  return "The contract provides contractual maturity and death benefit guarantees, subject to the terms of the Information Folder and Contract.";
+};
+const reasonWhyContext = (data) => {
+  const sf = data.segregatedFundInvestment || {};
+  const ad = data.advisorDisclosure || {};
+  const nl = sf.nonLeverageCompliance || {};
+  const lc = sf.leverageCompliance || {};
+  const clientName = fullClientName(ad) || nl.clientNames || lc.clientNameAck || "Client";
+  const client2Name = (ad.client2Name || lc.jointNameAck || "").trim();
+  const amountRaw = sf.leverageLoan === "yes" ? lc.principalLoan : nl.amountToInvest;
+  return {
+    company: companyDisplayName(sf.selectedInsuranceCompany),
+    accountType: sf.reasonWhy?.accountType || "",
+    accountLabel: reasonWhyLabel(sf.reasonWhy?.accountType),
+    date: fmtLongDate(todayISO()),
+    clientName,
+    client2Name,
+    householdName: [clientName, client2Name].filter(Boolean).join(" and "),
+    investmentAmount: fmtMoney(amountRaw) || "the contribution amount discussed",
+    guaranteeText: guaranteeSentence(nl.guarantee),
+    riskProfile: nl.riskProfile || lc.investmentObjectives || "the risk tolerance documented in your Know-Your-Client profile",
+    timeHorizon: nl.timeHorizon || lc.timeHorizon || "your documented investment time horizon",
+  };
+};
+const reasonWhyCopy = (ctx) => {
+  const base = {
+    RRSP: {
+      recommendation: `Based on our recent meeting and the financial needs analysis we completed together, I am recommending that you establish a Registered Retirement Savings Plan (RRSP) under a segregated fund contract with ${ctx.company}. The contribution amount is ${ctx.investmentAmount}.`,
+      objectives: "Your stated objectives are to reduce current taxable income through an RRSP contribution, grow retirement savings on a tax-deferred basis over a long-term horizon, protect contributed capital through contractual guarantees, and keep the retirement plan aligned with your documented risk tolerance.",
+      meets: `An RRSP segregated fund contract addresses these objectives by combining the tax advantages of an RRSP with insurance-contract features. Your contribution may generate a tax deduction, investment growth accumulates tax-deferred until withdrawal, and ${ctx.guaranteeText} Based on ${ctx.timeHorizon} and ${ctx.riskProfile}, the recommended segregated funds are intended to support long-term retirement growth while retaining flexibility to switch between available funds as circumstances change.`,
+      alternatives: "We discussed alternatives including non-registered investments and a traditional RRSP held outside an insurance contract. The segregated fund RRSP was recommended because it combines RRSP tax treatment with maturity and death benefit guarantees and estate-planning features available through an insurance contract.",
+    },
+    FHSA: {
+      recommendation: `Based on our recent meeting and the financial needs analysis we completed together, I am recommending that you establish a First Home Savings Account (FHSA) under a segregated fund contract with ${ctx.company}. The contribution amount is ${ctx.investmentAmount}.`,
+      objectives: "Your stated objective is to save toward a first qualifying home in a tax-efficient way while maintaining an investment structure that is consistent with your time horizon and comfort with market risk.",
+      meets: `The FHSA combines a contribution-side tax deduction with tax-free qualifying withdrawals for a first home purchase. The segregated fund contract adds insurance-contract features, and ${ctx.guaranteeText} Based on ${ctx.timeHorizon} and ${ctx.riskProfile}, the recommended funds are intended to support your home-purchase savings goal while recognizing the need for downside protection and flexibility as your timeline approaches.`,
+      alternatives: "We discussed alternatives such as using a TFSA, using the Home Buyers' Plan through an RRSP, or holding savings in a deposit product. The FHSA was recommended because it directly supports first-home savings and provides tax treatment that is specifically designed for this goal.",
+    },
+    "TFSA Lump Sum": {
+      recommendation: `Based on our recent meeting and the financial needs analysis we completed together, I am recommending that you make a lump-sum deposit of ${ctx.investmentAmount} into a Tax-Free Savings Account (TFSA) under a segregated fund contract with ${ctx.company}.`,
+      objectives: "Your stated objectives are to invest available savings in a tax-free account, preserve flexibility for future withdrawals, grow the assets over time, and use a structure that provides contractual downside protection.",
+      meets: `A TFSA provides tax-free growth and tax-free withdrawals. The segregated fund contract enhances the recommendation with insurance-contract features, and ${ctx.guaranteeText} Because this is a lump-sum deposit, the full contribution can begin participating in the selected investment portfolio immediately, subject to market fluctuation and the terms of the contract.`,
+      alternatives: "We discussed alternatives including a high-interest savings account, a GIC, and a non-registered investment account. The segregated fund TFSA was recommended because it combines TFSA tax treatment with maturity and death benefit guarantees available through an insurance contract.",
+    },
+    "Non-Registered": {
+      recommendation: `Based on our recent meeting and the financial needs analysis we completed together, I am recommending that you establish a Non-Registered account under a segregated fund contract with ${ctx.company}. The contribution amount is ${ctx.investmentAmount}.`,
+      objectives: "Your stated objectives are to continue building investment wealth outside registered plans, maintain an investment approach that reflects your documented risk tolerance, and use an insurance-contract structure that may support estate and creditor-protection planning where applicable.",
+      meets: `The Non-Registered segregated fund contract allows you to invest beyond registered account limits while using a structure that offers insurance-contract features. ${ctx.guaranteeText} Based on ${ctx.timeHorizon} and ${ctx.riskProfile}, the recommended portfolio is intended to support long-term wealth building while retaining flexibility to adjust fund selections as your needs evolve.`,
+      alternatives: "We discussed alternatives including traditional non-registered mutual fund accounts, GICs, and direct ownership of securities. The segregated fund contract was recommended because it provides insurance-contract features that are not available through ordinary investment accounts.",
+    },
+    "Spousal RRSP": {
+      recommendation: `Based on our recent meeting and the financial needs analysis we completed together, I am recommending that ${ctx.householdName || ctx.clientName} establish a Spousal Registered Retirement Savings Plan (Spousal RRSP) under a segregated fund contract with ${ctx.company}. The contribution amount is ${ctx.investmentAmount}.`,
+      objectives: "Your household objectives are to build retirement savings, support future retirement income planning between spouses, protect contributed capital through contractual guarantees, and keep the recommendation aligned with your documented risk tolerance and time horizon.",
+      meets: `A Spousal RRSP can help a household direct retirement savings toward a spouse and may support retirement income planning over time. The segregated fund contract adds insurance-contract features, and ${ctx.guaranteeText} I have also reviewed that Spousal RRSP withdrawals may be subject to attribution rules when withdrawals occur within the same calendar year as a contribution or within either of the following two calendar years.`,
+      alternatives: "We discussed alternatives such as each spouse contributing separately to individual RRSPs and using other retirement income planning strategies. The Spousal RRSP was recommended because it can support household retirement planning while adding segregated fund contract features.",
+    },
+  };
+  return base[ctx.accountType] || null;
+};
 
 /* ============================================================
    INLINE SIGNATURE / DATE / INITIAL PLACEHOLDER
@@ -3008,6 +3099,64 @@ const EquitableQpdf = ({ q }) => (
   </>
 );
 
+/* --------- Reason Why Letter  -  Segregated Funds --------- */
+const ReasonWhyPdf = ({ data }) => {
+  const ctx = reasonWhyContext(data);
+  const copy = reasonWhyCopy(ctx);
+  if (!copy) return null;
+  const contractTitle = `${ctx.company} Segregated Fund Contract - ${ctx.accountLabel}`;
+  return (
+    <>
+      <PdfPage>
+        <PdfHeader title="Reason Why Letter" subtitle={contractTitle} pageLabel="Reason Why Letter" />
+        <div style={{ marginTop: 14, fontSize: PDF_TYPE.body, color: TEXT_COLOR, lineHeight: 1.62 }}>
+          <PdfText>{ctx.date}</PdfText>
+          <PdfText>Dear <b>{ctx.accountType === "Spousal RRSP" ? (ctx.householdName || ctx.clientName) : ctx.clientName}</b>,</PdfText>
+        </div>
+        <PdfSection title="Recommendation">
+          <PdfText>{copy.recommendation}</PdfText>
+        </PdfSection>
+        <PdfSection title="Your Stated Needs & Objectives">
+          <PdfText>{copy.objectives}</PdfText>
+        </PdfSection>
+        <PdfSection title="How This Recommendation Meets Your Needs">
+          <PdfText>{copy.meets}</PdfText>
+        </PdfSection>
+      </PdfPage>
+      <PdfPage>
+        <PdfHeader title="Reason Why Letter" subtitle={contractTitle} pageLabel="Reason Why Letter continued" />
+        <PdfSection title="Disclosures">
+          <PdfText>Prior to the signing of your application, I provided you with the Fund Facts document for each segregated fund selected, as well as the Information Folder and Contract for this segregated fund contract. We reviewed the key features, risks, guarantees, fees, and rescission rights described in those documents. Digital copies were sent to you by email; please let me know if you have not received them so I can provide duplicates for your records.</PdfText>
+        </PdfSection>
+        <PdfSection title="Risk Disclosures">
+          <PdfText>Segregated fund contracts are issued by an insurance company. They are not deposits and are not insured by the Canada Deposit Insurance Corporation (CDIC) or any other government deposit insurer. Although there is a degree of consumer protection provided by Assuris within prescribed limits, the value of the contract is not guaranteed by the Government of Canada or any provincial deposit insurer.</PdfText>
+          <PdfText>The market value of your contract will fluctuate based on changes in the unit values of the underlying funds. Maturity and death benefit guarantees apply only as described in the Information Folder and Contract; withdrawals made before maturity may proportionately reduce guaranteed amounts. Past performance of any fund is not a reliable indicator of future results.</PdfText>
+        </PdfSection>
+        <PdfSection title="Alternatives Considered">
+          <PdfText>{copy.alternatives}</PdfText>
+        </PdfSection>
+      </PdfPage>
+      <PdfPage>
+        <PdfHeader title="Reason Why Letter" subtitle={contractTitle} pageLabel="Reason Why Letter acknowledgement" />
+        <PdfSection title="Important Notice">
+          <PdfText>If any of the information about you or your needs described in this letter is not correct, please contact me right away so we can update our records and reassess the suitability of this recommendation.</PdfText>
+          <PdfText>If you have any questions about the policy, your investments, the guarantees, the fees, or why I am recommending this solution, please do not hesitate to ask me now or at any time in the future. I encourage you to keep this letter with your contract and policy documents as a permanent record of why you have purchased this product and the rationale behind the recommendation.</PdfText>
+          <PdfText>I will continue to review your contract with you periodically to ensure it remains aligned with your evolving financial circumstances, goals, and risk tolerance. If your personal or financial situation changes in a material way, please contact me so we can reassess your needs.</PdfText>
+          <PdfText>I truly appreciate the trust and confidence you have placed in me. Thank you again for choosing me as your insurance and investment advisor.</PdfText>
+        </PdfSection>
+        <PdfSection title="Client Acknowledgement">
+          <PdfText>I acknowledge that I have reviewed this Reason Why Letter and understand the rationale for the recommendation described above.</PdfText>
+          <div style={{ marginTop: 14, padding: 12, background: "#FAFAF6", borderLeft: "3px solid " + GOLD }}>
+            <div style={{ fontSize: PDF_TYPE.label, color: NAVY, letterSpacing: 0.65, textTransform: "uppercase", fontWeight: 650, marginBottom: 8 }}>{ctx.clientName}</div>
+            <SigPlaceholder kind="signature" signer="signer2" label="Client Signature" width={240}/>
+            <SigPlaceholder kind="date" signer="signer2" label="Date" width={130}/>
+          </div>
+        </PdfSection>
+      </PdfPage>
+    </>
+  );
+};
+
 /* --------- Life Insurance Needs Analysis --------- */
 const LifeInsurancePdf = ({ li }) => {
   const num = (x) => Number(x || 0);
@@ -3128,6 +3277,7 @@ const PrintableDocument = ({ data }) => {
       {isSegFund && ic === "iA Financial"  && <IAQpdf          q={sf.insuranceQuestionnaire.iaFinancial}/>}
       {isSegFund && ic === "Canada Life"   && <CanadaLifeQpdf  q={sf.insuranceQuestionnaire.canadaLife}/>}
       {isSegFund && ic === "Equitable Life"&& <EquitableQpdf   q={sf.insuranceQuestionnaire.equitableLife}/>}
+      {isSegFund && sf.reasonWhy?.include !== false && sf.reasonWhy?.accountType && <ReasonWhyPdf data={data}/>}
       {isLifeIns && <LifeInsurancePdf li={data.lifeInsurance.needsAnalysis}/>}
     </div>
   );
@@ -3325,12 +3475,18 @@ const blobToBase64 = (blob) => new Promise((resolve, reject) => {
 /* ============================================================
    REVIEW & GENERATE PDF
    ============================================================ */
-const ReviewAndGeneratePDF = ({ data, goToStep }) => {
+const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
   const printableRef = useRef(null);
   const [generating, setGenerating] = useState(false);
 
   // Builds a multi-page PDF by rasterising each .pdf-page element separately.
   const buildPdf = async () => {
+    if (data.businessType === "Segregated Fund Investment") {
+      const rw = makeReasonWhy(data.segregatedFundInvestment.reasonWhy);
+      if (rw.include !== false && !rw.accountType) {
+        throw new Error("Please select a Reason Why Letter account type before downloading the PDF.");
+      }
+    }
     const { jsPDF } = window.jspdf;
     const node = printableRef.current.querySelector(".pdf-content");
     const pages = node.querySelectorAll(".pdf-page");
@@ -3383,6 +3539,12 @@ const ReviewAndGeneratePDF = ({ data, goToStep }) => {
   };
   const ad = data.advisorDisclosure;
   const sf = data.segregatedFundInvestment;
+  const reasonWhy = makeReasonWhy(sf.reasonWhy);
+  const setReasonWhy = (patch) => update("segregatedFundInvestment", {
+    ...sf,
+    reasonWhy: { ...reasonWhy, ...patch },
+  });
+  const reasonWhyCtx = reasonWhyContext(data);
   const li = data.lifeInsurance.needsAnalysis;
   const isSegFund = data.businessType === "Segregated Fund Investment";
   const isLifeIns = data.businessType === "Life Insurance";
@@ -3485,6 +3647,23 @@ const ReviewAndGeneratePDF = ({ data, goToStep }) => {
             {sf.selectedInsuranceCompany === "iA Financial" && <IAReview d={sf.insuranceQuestionnaire.iaFinancial}/>}
             {sf.selectedInsuranceCompany === "Canada Life" && <CanadaLifeReview d={sf.insuranceQuestionnaire.canadaLife}/>}
             {sf.selectedInsuranceCompany === "Equitable Life" && <EquitableReview d={sf.insuranceQuestionnaire.equitableLife}/>}
+          </ReviewPanel>
+        )}
+
+        {isSegFund && (
+          <ReviewPanel title="5. Reason Why Letter">
+            <div className="grid md:grid-cols-2 gap-4">
+              <Field label="Include Reason Why Letter">
+                <Checkbox checked={reasonWhy.include !== false} onChange={v => setReasonWhy({ include: v })} label="Generate Reason Why Letter in PDF"/>
+              </Field>
+              <Field label="Account type" required>
+                <Select value={reasonWhy.accountType} onChange={v => setReasonWhy({ accountType: v })} options={REASON_WHY_ACCOUNT_OPTIONS}/>
+              </Field>
+            </div>
+            <ReviewSummaryRow label="Company" value={reasonWhyCtx.company}/>
+            <ReviewSummaryRow label="Client name" value={reasonWhyCtx.clientName}/>
+            <ReviewSummaryRow label="Investment amount" value={reasonWhyCtx.investmentAmount}/>
+            <div className="mt-2 text-xs text-gray-600">PDF will include client signature and date boxes only. Advisor signature is not included on this letter.</div>
           </ReviewPanel>
         )}
 
@@ -3994,7 +4173,7 @@ const App = () => {
       case "canadaLife":        return <CanadaLifeQuestionnaire data={formData} update={update} markManualNamePath={markManualNamePath}/>;
       case "equitableLife":     return <EquitableLifeQuestionnaire data={formData} update={update} markManualNamePath={markManualNamePath}/>;
       case "needsAnalysis":     return <LifeInsuranceNeedsAnalysisForm data={formData} update={update} markManualNamePath={markManualNamePath}/>;
-      case "review":            return <ReviewAndGeneratePDF data={formData} goToStep={goToStepByKey}/>;
+      case "review":            return <ReviewAndGeneratePDF data={formData} goToStep={goToStepByKey} update={update}/>;
       default:                  return <div className="text-center text-gray-500 py-10">Loading...</div>;
     }
   };
