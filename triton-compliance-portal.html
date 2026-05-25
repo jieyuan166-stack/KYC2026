@@ -943,7 +943,7 @@ const AdvisorDisclosureForm = ({ data, update }) => {
             <Field label="Date" required><TextInput type="date" value={d.client1Date} onChange={v => set("client1Date", v)} /></Field>
           </div>
           <div className="border border-gray-200 rounded p-3">
-            <div className="font-semibold text-navy mb-2">Client 2 (Spouse, if applicable)</div>
+            <div className="font-semibold text-navy mb-2">Client 2 (if applicable)</div>
             <Field label="Client name"><TextInput value={d.client2Name} onChange={v => set("client2Name", v)} /></Field>
             <SignatureField value={d.client2Signature} onChange={v => set("client2Signature", v)} label="Client signature" />
             <Field label="Date"><TextInput type="date" value={d.client2Date} onChange={v => set("client2Date", v)} /></Field>
@@ -2569,7 +2569,7 @@ const AdvisorDisclosurePdf = ({ ad }) => (
         </div>
         {(ad.client2Name || ad.spouseConsent) && (
           <div style={{ marginTop: 10, padding: 12, background: "#FAFAF6", borderLeft: "3px solid " + GOLD }}>
-            <div style={{ fontSize: PDF_TYPE.label, color: NAVY, letterSpacing: 0.65, textTransform: "uppercase", fontWeight: 650, marginBottom: 8 }}>Client 2 (Spouse){ad.client2Name ? ` — ${ad.client2Name}` : ""}</div>
+            <div style={{ fontSize: PDF_TYPE.label, color: NAVY, letterSpacing: 0.65, textTransform: "uppercase", fontWeight: 650, marginBottom: 8 }}>Client 2 (if applicable){ad.client2Name ? ` — ${ad.client2Name}` : ""}</div>
             <SigPlaceholder kind="signature" signer="signer3" label="Client 2 Signature" width={220}/>
             <SigPlaceholder kind="date" signer="signer3" label="Date" width={130}/>
           </div>
