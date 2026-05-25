@@ -2364,7 +2364,7 @@ const PdfPage = ({ children, cover, padded = true, orientation = "portrait" }) =
 
 const ReasonWhyPage = ({ children }) => (
   <PdfPage padded={false}>
-    <div style={{ padding: "44px 80px 60px 80px", minHeight: PDF_PAGE_H, boxSizing: "border-box" }}>
+    <div style={{ padding: "40px 90px 42px 90px", minHeight: PDF_PAGE_H, boxSizing: "border-box" }}>
       {children}
     </div>
   </PdfPage>
@@ -2638,6 +2638,7 @@ const fmtLongDate = (v) => {
 };
 const companyDisplayName = (company) => company === "iA Financial" ? "iA FINANCIAL" : (company || "the selected insurance company");
 const reasonWhyLabel = (value) => REASON_WHY_ACCOUNT_OPTIONS.find(o => o.value === normalizeReasonWhyAccountType(value))?.label || normalizeReasonWhyAccountType(value) || "";
+const reasonWhyContractSubtitle = (ctx) => `${ctx.company} Segregated Fund Contract${ctx.accountLabel ? " - " + ctx.accountLabel : ""}`;
 const parseGuarantee = (value) => {
   const match = String(value || "").match(/(\d+)\s*\/\s*(\d+)/);
   return match ? { maturity: match[1], death: match[2] } : null;
@@ -3309,22 +3310,23 @@ const ReasonWhyPdf = ({ data }) => {
   const body = makeReasonWhy(data.segregatedFundInvestment?.reasonWhy).body;
   const blocks = stripReasonWhyLeadingTitles(reasonWhyBodyBlocks(body), ctx);
   if (!blocks.length) return null;
-  const pages = chunkReasonWhyBlocks(blocks, 2950);
+  const pages = chunkReasonWhyBlocks(blocks, 3200);
+  const contractTitle = reasonWhyContractSubtitle(ctx);
   const renderBlock = (block, idx) => block.type === "heading" ? (
-    <div key={idx} style={{ color: TEXT_COLOR, fontSize: 11.4, fontWeight: 700, lineHeight: 1.42, marginTop: idx === 0 ? 0 : 12, marginBottom: 7 }}>{block.text}</div>
+    <div key={idx} style={{ color: TEXT_COLOR, fontSize: 11.05, fontWeight: 700, lineHeight: 1.35, marginTop: idx === 0 ? 0 : 10, marginBottom: 5 }}>{block.text}</div>
   ) : (
-    <div key={idx} style={{ fontSize: 11.05, lineHeight: 1.62, color: TEXT_COLOR, marginBottom: 12, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{block.text}</div>
+    <div key={idx} style={{ fontSize: 10.45, lineHeight: 1.54, color: TEXT_COLOR, marginBottom: 9, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{block.text}</div>
   );
   return (
     <>
       {pages.map((pageBlocks, pageIdx) => (
         <ReasonWhyPage key={pageIdx}>
-          <TritonLetterheadHeader title="Reason Why Letter" centerTitle />
-          <div style={{ marginTop: 14 }}>
+          <TritonLetterheadHeader title="Reason Why Letter" subtitle={contractTitle} centerTitle />
+          <div style={{ marginTop: 10 }}>
             {pageBlocks.map(renderBlock)}
             {pageIdx === pages.length - 1 && (
-              <div style={{ marginTop: 22, padding: 12, background: "#FAFAF6", borderLeft: "3px solid " + GOLD }}>
-                <div style={{ fontSize: PDF_TYPE.label, color: NAVY, letterSpacing: 0.65, textTransform: "uppercase", fontWeight: 650, marginBottom: 8 }}>{ctx.clientName}</div>
+              <div style={{ marginTop: 15, padding: 10, background: "#FAFAF6", borderLeft: "3px solid " + GOLD }}>
+                <div style={{ fontSize: PDF_TYPE.label, color: NAVY, letterSpacing: 0.65, textTransform: "uppercase", fontWeight: 650, marginBottom: 6 }}>{ctx.clientName}</div>
                 <SigPlaceholder kind="signature" signer="signer2" label="Client Signature" width={240}/>
                 <SigPlaceholder kind="date" signer="signer2" label="Date" width={130}/>
               </div>
@@ -3342,22 +3344,23 @@ const ReasonWhyAttachmentTextPdf = ({ data }) => {
   if (attachment.kind !== "docx" || !hasText(attachment.text)) return null;
   const ctx = reasonWhyContext(data);
   const blocks = withClientAcknowledgement(stripReasonWhyLeadingTitles(letterBodyBlocks(attachment.text), ctx));
-  const pages = chunkReasonWhyBlocks(blocks, 2950);
+  const pages = chunkReasonWhyBlocks(blocks, 3200);
+  const contractTitle = reasonWhyContractSubtitle(ctx);
   const renderBlock = (block, idx) => block.type === "heading" ? (
-    <div key={idx} style={{ color: TEXT_COLOR, fontSize: 11.4, fontWeight: 700, lineHeight: 1.42, marginTop: idx === 0 ? 0 : 12, marginBottom: 7, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{block.text}</div>
+    <div key={idx} style={{ color: TEXT_COLOR, fontSize: 11.05, fontWeight: 700, lineHeight: 1.35, marginTop: idx === 0 ? 0 : 10, marginBottom: 5, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{block.text}</div>
   ) : (
-    <div key={idx} style={{ fontSize: 11.1, lineHeight: 1.64, color: TEXT_COLOR, marginBottom: 13, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{block.text}</div>
+    <div key={idx} style={{ fontSize: 10.45, lineHeight: 1.55, color: TEXT_COLOR, marginBottom: 9, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{block.text}</div>
   );
   return (
     <>
       {pages.map((pageBlocks, pageIdx) => (
         <ReasonWhyPage key={`attachment-${pageIdx}`}>
-          <TritonLetterheadHeader title="Reason Why Letter" compact centerTitle />
-          <div style={{ marginTop: 10 }}>
+          <TritonLetterheadHeader title="Reason Why Letter" subtitle={contractTitle} compact centerTitle />
+          <div style={{ marginTop: 8 }}>
             {pageBlocks.map(renderBlock)}
             {pageIdx === pages.length - 1 && (
-              <div style={{ marginTop: 22, padding: 12, background: "#FAFAF6", borderLeft: "3px solid " + GOLD }}>
-                <div style={{ fontSize: PDF_TYPE.label, color: NAVY, letterSpacing: 0.65, textTransform: "uppercase", fontWeight: 650, marginBottom: 8 }}>{ctx.clientName}</div>
+              <div style={{ marginTop: 15, padding: 10, background: "#FAFAF6", borderLeft: "3px solid " + GOLD }}>
+                <div style={{ fontSize: PDF_TYPE.label, color: NAVY, letterSpacing: 0.65, textTransform: "uppercase", fontWeight: 650, marginBottom: 6 }}>{ctx.clientName}</div>
                 <SigPlaceholder kind="signature" signer="signer2" label="Client Signature" width={240}/>
                 <SigPlaceholder kind="date" signer="signer2" label="Date" width={130}/>
               </div>
@@ -3780,16 +3783,16 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
       if (i > 0) pdf.addPage("letter", pageOrientation);
       const pageWmm = pdf.internal.pageSize.getWidth();
       const pageHmm = pdf.internal.pageSize.getHeight();
-      const canvas = await html2canvas(pageEl, { scale: 3, useCORS: true, backgroundColor: "#ffffff" });
+      const canvas = await html2canvas(pageEl, { scale: 4, useCORS: true, backgroundColor: "#ffffff" });
       const imgData = canvas.toDataURL("image/png");
       const imgW = pageWmm;
       const imgH = (canvas.height * imgW) / canvas.width;
       // Fit-to-width; if too tall, scale down to fit page
       if (imgH > pageHmm) {
         const scaledW = (imgW * pageHmm) / imgH;
-        pdf.addImage(imgData, "PNG", (pageWmm - scaledW) / 2, 0, scaledW, pageHmm);
+        pdf.addImage(imgData, "PNG", (pageWmm - scaledW) / 2, 0, scaledW, pageHmm, undefined, "NONE");
       } else {
-        pdf.addImage(imgData, "PNG", 0, 0, imgW, imgH);
+        pdf.addImage(imgData, "PNG", 0, 0, imgW, imgH, undefined, "NONE");
       }
     }
 
