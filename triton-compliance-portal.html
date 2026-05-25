@@ -843,7 +843,7 @@ const AdvisorDisclosureForm = ({ data, update }) => {
             <tr><td>MANULIFE</td></tr>
             <tr><td>SUN LIFE</td></tr>
             <tr><td>EQUITABLE LIFE</td></tr>
-            <tr><td>iA Financial</td></tr>
+            <tr><td>iA FINANCIAL</td></tr>
           </tbody>
         </table>
         <p className="text-sm text-gray-700 mt-3">For my other occupation, I have a business relationship with <em><b>1264670 BC Ltd. and J Yuan Holding Ltd.</b></em> Under this arrangement, I provide <em><b>Mutual Funds &amp; Exempt market services through 1264670 BC Ltd.</b></em> Compensation for these services is <b>commission-based.</b> I have an ownership interest <em><b>in both 1264670 BC Ltd. and J Yuan Holding Ltd.</b></em> My involvement in the other business includes <em><b>providing mutual fund services through 1264670 BC Ltd. and holding business assets under J Yuan Holding Ltd.,</b></em> which functions solely as a holding company.</p>
@@ -1391,7 +1391,7 @@ const InsuranceCompanySelection = ({ data, update }) => {
   const set = (v) => update("segregatedFundInvestment", { ...data.segregatedFundInvestment, selectedInsuranceCompany: v });
   const companies = [
     { value: "Manulife",       en: "Manulife", desc: "Manulife Segregated Fund Solutions  -  Investor Profile Questionnaire" },
-    { value: "iA Financial",   en: "iA Financial", desc: "iA Financial Group  -  Your Investor Profile (F51-122A)" },
+    { value: "iA Financial",   en: "iA FINANCIAL", desc: "iA FINANCIAL Group  -  Your Investor Profile (F51-122A)" },
     { value: "Canada Life",    en: "Canada Life", desc: "Canada Life  -  Investment Personality Questionnaire" },
     { value: "Equitable Life", en: "Equitable",   desc: "Equitable  -  Investor Profile Questionnaire" },
   ];
@@ -1408,7 +1408,7 @@ const InsuranceCompanySelection = ({ data, update }) => {
           <button key={c.value} type="button" onClick={() => set(c.value)}
             className={`choice-card ${data.segregatedFundInvestment.selectedInsuranceCompany === c.value ? "selected" : ""}`}>
             <div className="choice-en">{c.en}</div>
-            <div className="choice-title">{c.value}</div>
+            <div className="choice-title">{c.en}</div>
             <div className="choice-desc">{c.desc}</div>
           </button>
         ))}
@@ -1602,7 +1602,7 @@ const IAFinancialQuestionnaire = ({ data, update, markManualNamePath = () => {} 
   return (
     <div className="space-y-5">
       <header className="text-center pb-3 border-b">
-        <div className="font-bold text-blue-800 text-xl">iA Financial Group</div>
+        <div className="font-bold text-blue-800 text-xl">iA FINANCIAL Group</div>
         <h2 className="text-2xl font-bold text-navy mt-1">Your investor profile (F51-122A)</h2>
       </header>
 
@@ -2469,7 +2469,7 @@ const AdvisorDisclosurePdf = ({ ad }) => (
       </PdfSection>
       <PdfSection title="Companies I represent">
         <PdfText>I represent the following insurers to market their products which include life insurance, critical illness insurance, disability insurance, travel insurance, group insurance, and segregated funds through Citistar Financial Services Ltd., a Managing General Agency (MGA):</PdfText>
-        <PdfTable headers={["Name of Business / Insurance Carriers"]} rows={[["CANADA LIFE"],["MANULIFE"],["SUN LIFE"],["EQUITABLE LIFE"],["iA Financial"]]}/>
+        <PdfTable headers={["Name of Business / Insurance Carriers"]} rows={[["CANADA LIFE"],["MANULIFE"],["SUN LIFE"],["EQUITABLE LIFE"],["iA FINANCIAL"]]}/>
         <PdfText>For my other occupation, I have a business relationship with <b><i>1264670 BC Ltd. and J Yuan Holding Ltd.</i></b> Under this arrangement, I provide <b><i>Mutual Funds &amp; Exempt market services through 1264670 BC Ltd.</i></b> Compensation for these services is <b>commission-based.</b> I have an ownership interest <b><i>in both 1264670 BC Ltd. and J Yuan Holding Ltd.</i></b></PdfText>
       </PdfSection>
       <PdfSection title="Nature of relationship with insurance company(ies) I represent">
@@ -2752,7 +2752,7 @@ const ManulifeQpdf = ({ q }) => (
 
 const IAQpdf = ({ q }) => (
   <PdfPage>
-    <PdfHeader title="iA Financial Group  -  Your Investor Profile" subtitle="F51-122A" pageLabel="iA Financial Questionnaire" />
+    <PdfHeader title="iA FINANCIAL Group  -  Your Investor Profile" subtitle="F51-122A" pageLabel="iA FINANCIAL Questionnaire" />
     <PdfSection title="Contract / Registration">
       <PdfField label="Application Type" value={q.applicationType}/>
       <PdfField label="NP Number" value={q.npNumber}/>
@@ -3323,7 +3323,7 @@ const ReviewAndGeneratePDF = ({ data, goToStep }) => {
         )}
 
         {isSegFund && (
-          <ReviewPanel title={`4. Insurance Company Questionnaire  -  ${sf.selectedInsuranceCompany || " - "}`}>
+          <ReviewPanel title={`4. Insurance Company Questionnaire  -  ${sf.selectedInsuranceCompany === "iA Financial" ? "iA FINANCIAL" : (sf.selectedInsuranceCompany || " - ")}`}>
             {sf.selectedInsuranceCompany === "Manulife" && <ManulifeReview d={sf.insuranceQuestionnaire.manulife}/>}
             {sf.selectedInsuranceCompany === "iA Financial" && <IAReview d={sf.insuranceQuestionnaire.iaFinancial}/>}
             {sf.selectedInsuranceCompany === "Canada Life" && <CanadaLifeReview d={sf.insuranceQuestionnaire.canadaLife}/>}
