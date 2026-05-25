@@ -3401,7 +3401,7 @@ const PrintableDocument = ({ data }) => {
   const isLifeIns = data.businessType === "Life Insurance";
   const ic = sf.selectedInsuranceCompany;
   const rw = makeReasonWhy(sf.reasonWhy);
-  const hasReasonWhyAttachment = !!rw.attachment?.kind;
+  const hasReasonWhyAttachment = reasonWhyHasAttachment(rw);
   return (
     <div>
       <PdfCoverPage data={data}/>
@@ -3413,7 +3413,7 @@ const PrintableDocument = ({ data }) => {
       {isSegFund && ic === "Canada Life"   && <CanadaLifeQpdf  q={sf.insuranceQuestionnaire.canadaLife}/>}
       {isSegFund && ic === "Equitable Life"&& <EquitableQpdf   q={sf.insuranceQuestionnaire.equitableLife}/>}
       {isSegFund && rw.include !== false && !hasReasonWhyAttachment && rw.accountType && <ReasonWhyPdf data={data}/>}
-      {isSegFund && rw.include !== false && hasReasonWhyAttachment && <ReasonWhyAttachmentTextPdf data={data}/>}
+      {isSegFund && hasReasonWhyAttachment && <ReasonWhyAttachmentTextPdf data={data}/>}
       {isLifeIns && <LifeInsurancePdf li={data.lifeInsurance.needsAnalysis}/>}
     </div>
   );
@@ -3619,21 +3619,25 @@ const fileToArrayBuffer = (file) => new Promise((resolve, reject) => {
   reader.onerror = reject;
   reader.readAsArrayBuffer(file);
 });
-const dataUrlToUint8Array = (dataUrl) => {
-  const base64 = String(dataUrl || "").split(",")[1] || "";
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
+const reasonWhyHasAttachment = (reasonWhy) => {
+  const attachment = makeReasonWhy(reasonWhy).attachment;
+  return (attachment.kind === "pdf" && !!attachment.dataUrl) || (attachment.kind === "docx" && hasText(attachment.text));
 };
 const mergePdfAttachment = async (jsPdf, attachment) => {
   if (attachment?.kind !== "pdf" || !attachment.dataUrl) return jsPdf.output("blob");
   if (!window.PDFLib?.PDFDocument) throw new Error("PDF attachment support failed to load. Please refresh and try again.");
   const { PDFDocument } = window.PDFLib;
-  const mainDoc = await PDFDocument.load(jsPdf.output("arraybuffer"));
-  const attachmentDoc = await PDFDocument.load(dataUrlToUint8Array(attachment.dataUrl));
+  const mainBytes = await jsPdf.output("blob").arrayBuffer();
+  const attachmentBytes = await (await fetch(attachment.dataUrl)).arrayBuffer();
+  const mainDoc = await PDFDocument.load(mainBytes);
+  const attachmentDoc = await PDFDocument.load(attachmentBytes);
+  const originalPageCount = mainDoc.getPageCount();
+  const attachmentPageCount = attachmentDoc.getPageCount();
   const attachmentPages = await mainDoc.copyPages(attachmentDoc, attachmentDoc.getPageIndices());
   attachmentPages.forEach(page => mainDoc.addPage(page));
+  if (mainDoc.getPageCount() !== originalPageCount + attachmentPageCount) {
+    throw new Error("The attached Reason Why PDF could not be merged into the final PDF.");
+  }
   const mergedBytes = await mainDoc.save();
   return new Blob([mergedBytes], { type: "application/pdf" });
 };
@@ -3661,7 +3665,7 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
   const buildPdf = async () => {
     if (data.businessType === "Segregated Fund Investment") {
       const rw = makeReasonWhy(data.segregatedFundInvestment.reasonWhy);
-      const hasReasonWhyAttachment = !!rw.attachment?.kind;
+      const hasReasonWhyAttachment = reasonWhyHasAttachment(rw);
       if (rw.include !== false && !hasReasonWhyAttachment && !rw.accountType) {
         throw new Error("Please select a Reason Why Letter account type before downloading the PDF.");
       }
@@ -3725,7 +3729,7 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
   const ad = data.advisorDisclosure;
   const sf = data.segregatedFundInvestment;
   const reasonWhy = makeReasonWhy(sf.reasonWhy);
-  const hasReasonWhyAttachment = !!reasonWhy.attachment?.kind;
+  const hasReasonWhyAttachment = reasonWhyHasAttachment(reasonWhy);
   const setReasonWhy = (patch) => update("segregatedFundInvestment", {
     ...sf,
     reasonWhy: { ...reasonWhy, ...patch },
@@ -3938,7 +3942,7 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
             <div className="mt-4 rounded border border-gray-200 bg-gray-50 p-3">
               <div className="text-xs font-semibold text-navy mb-2">Attach Reason Why Word/PDF</div>
               <input type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={handleReasonWhyAttachment} className="text-xs"/>
-              <div className="text-[11px] text-gray-600 mt-2">If a Reason Why file is attached, it replaces the template Reason Why letter and is exported with the full KYC package. PDF attachments are appended as original pages. Word attachments are converted to Triton letterhead pages.</div>
+              <div className="text-[11px] text-gray-600 mt-2">If a Reason Why file is attached, it replaces the template Reason Why letter and is exported with the full KYC package, even if the template include switch is off. PDF attachments are appended as original pages. Word attachments are converted to Triton letterhead pages.</div>
               {attachmentBusy && <div className="text-xs text-gray-600 mt-2">Processing attachment...</div>}
               {attachmentError && <div className="text-xs text-red-700 mt-2">{attachmentError}</div>}
               {reasonWhy.attachment?.fileName && (
