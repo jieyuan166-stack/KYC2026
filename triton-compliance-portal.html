@@ -3437,7 +3437,7 @@ const PrintableDocument = ({ data }) => {
       {isSegFund && ic === "iA Financial"  && <IAQpdf          q={sf.insuranceQuestionnaire.iaFinancial}/>}
       {isSegFund && ic === "Canada Life"   && <CanadaLifeQpdf  q={sf.insuranceQuestionnaire.canadaLife}/>}
       {isSegFund && ic === "Equitable Life"&& <EquitableQpdf   q={sf.insuranceQuestionnaire.equitableLife}/>}
-      {isSegFund && rw.include !== false && !hasReasonWhyAttachment && rw.accountType && <ReasonWhyPdf data={data}/>}
+      {isSegFund && !hasReasonWhyAttachment && rw.accountType && <ReasonWhyPdf data={data}/>}
       {isSegFund && hasReasonWhyAttachment && <ReasonWhyAttachmentTextPdf data={data}/>}
       {isLifeIns && <LifeInsurancePdf li={data.lifeInsurance.needsAnalysis}/>}
     </div>
@@ -3652,11 +3652,13 @@ const effectiveReasonWhyData = (data) => {
   if (data?.businessType !== "Segregated Fund Investment") return data;
   const sf = data.segregatedFundInvestment || {};
   const rw = makeReasonWhy(sf.reasonWhy);
-  if (rw.include === false || reasonWhyHasAttachment(rw) || !rw.accountType || hasText(rw.body)) return data;
+  if (reasonWhyHasAttachment(rw) || !rw.accountType) return data;
+  if (rw.include !== false && hasText(rw.body)) return data;
   const effectiveData = deepClone(data);
   const effectiveReasonWhy = {
     ...rw,
-    body: generateReasonWhyBody(effectiveData),
+    include: true,
+    body: hasText(rw.body) ? rw.body : generateReasonWhyBody(effectiveData),
     generatedAccountType: rw.accountType,
   };
   effectiveData.segregatedFundInvestment.reasonWhy = effectiveReasonWhy;
@@ -3706,7 +3708,7 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
     if (effectivePdfData.businessType === "Segregated Fund Investment") {
       const rw = makeReasonWhy(effectivePdfData.segregatedFundInvestment.reasonWhy);
       const hasReasonWhyAttachment = reasonWhyHasAttachment(rw);
-      if (rw.include !== false && !hasReasonWhyAttachment && !rw.accountType) {
+      if (!hasReasonWhyAttachment && !rw.accountType) {
         throw new Error("Please select a Reason Why Letter account type before downloading the PDF.");
       }
     }
@@ -3978,7 +3980,7 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
               <div className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-3">Select an account type to generate an editable Reason Why Letter preview.</div>
             )}
             {!hasReasonWhyAttachment && (
-              <div className="mt-2 text-xs text-gray-600">If no Reason Why file is attached, the template letter will be generated automatically when you export the PDF.</div>
+              <div className="mt-2 text-xs text-gray-600">If no Reason Why file is attached, the template letter will be generated automatically when you export the PDF, even if the include switch is off.</div>
             )}
             <div className="mt-4 rounded border border-gray-200 bg-gray-50 p-3">
               <div className="text-xs font-semibold text-navy mb-2">Attach Reason Why Word/PDF</div>
