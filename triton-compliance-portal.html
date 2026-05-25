@@ -179,16 +179,6 @@
     letter-spacing: 0.02em;
     text-transform: uppercase;
   }
-  .sig-note { color: #8a6a14; font-size: 11px; margin-top: 5px; }
-  .validation-alert {
-    border: 1px solid #fecaca;
-    background: #fff1f2;
-    color: #991b1b;
-    border-radius: 6px;
-    padding: 10px 12px;
-    font-size: 13px;
-    font-weight: 600;
-  }
 
   /* Choice cards for business-type / leverage / insurance company selection */
   .choice-card {
@@ -465,35 +455,6 @@ const getSmartNameTargets = (formData, primaryName, spouseName) => {
     ["lifeInsurance.needsAnalysis.clientName", primaryName],
     ["lifeInsurance.needsAnalysis.policyOwnerName", primaryName],
   ];
-};
-
-const getCurrentStepClientNameErrors = (formData, stepKey) => {
-  const sf = formData.segregatedFundInvestment || {};
-  const lc = sf.leverageCompliance || {};
-  const nl = sf.nonLeverageCompliance || {};
-  const q = sf.insuranceQuestionnaire || {};
-  const li = formData.lifeInsurance?.needsAnalysis || {};
-  const errors = [];
-  const missing = (ok, label) => { if (!ok) errors.push(label); };
-
-  if (stepKey === "advisorDisclosure") missing(hasText(fullClientName(formData.advisorDisclosure || {})), "Advisor Disclosure client name is required.");
-  if (stepKey === "leverageCompliance") missing(hasText(lc.clientNameAck) || hasText(lc.clientFirst) || hasText(lc.clientLast), "Leverage KYC client name is required.");
-  if (stepKey === "nonLeverageCompliance") missing(hasText(nl.clientNames), "Sales Suitability client name is required.");
-  if (stepKey === "manulife") missing(hasText(q.manulife?.firstName) || hasText(q.manulife?.surname), "Manulife client name is required.");
-  if (stepKey === "iaFinancial") missing(hasText(q.iaFinancial?.lastFirstName), "iA Financial client name is required.");
-  if (stepKey === "canadaLife") missing(hasText(q.canadaLife?.name), "Canada Life client name is required.");
-  if (stepKey === "equitableLife") missing(hasText(q.equitableLife?.clientName), "Equitable Life client name is required.");
-  if (stepKey === "needsAnalysis") missing(hasText(li.clientName), "Insurance Needs Analysis client name is required.");
-
-  return errors;
-};
-
-const getRequiredClientNameErrors = (formData) => {
-  const errors = [];
-  ["advisorDisclosure", ...buildSteps(formData).map(s => s.key)]
-    .filter((key, idx, arr) => arr.indexOf(key) === idx)
-    .forEach(key => errors.push(...getCurrentStepClientNameErrors(formData, key)));
-  return errors;
 };
 
 const makeInvestmentPropertyRow = (row = {}) => ({
@@ -814,8 +775,7 @@ const Checkbox = ({ checked, onChange, label }) => (
 const SignatureField = ({ label = "Signature" }) => (
   <div>
     <label className="block text-sm font-medium text-navy mb-1">{label}</label>
-    <div className="sig-placeholder">Adobe Sign Field</div>
-    <div className="sig-note">Highlighted for Adobe Sign placement after PDF export.</div>
+    <div className="sig-placeholder"></div>
   </div>
 );
 
@@ -883,7 +843,7 @@ const AdvisorDisclosureForm = ({ data, update }) => {
             <tr><td>MANULIFE</td></tr>
             <tr><td>SUN LIFE</td></tr>
             <tr><td>EQUITABLE LIFE</td></tr>
-            <tr><td>IA</td></tr>
+            <tr><td>iA Financial</td></tr>
           </tbody>
         </table>
         <p className="text-sm text-gray-700 mt-3">For my other occupation, I have a business relationship with <em><b>1264670 BC Ltd. and J Yuan Holding Ltd.</b></em> Under this arrangement, I provide <em><b>Mutual Funds &amp; Exempt market services through 1264670 BC Ltd.</b></em> Compensation for these services is <b>commission-based.</b> I have an ownership interest <em><b>in both 1264670 BC Ltd. and J Yuan Holding Ltd.</b></em> My involvement in the other business includes <em><b>providing mutual fund services through 1264670 BC Ltd. and holding business assets under J Yuan Holding Ltd.,</b></em> which functions solely as a holding company.</p>
@@ -1431,7 +1391,7 @@ const InsuranceCompanySelection = ({ data, update }) => {
   const set = (v) => update("segregatedFundInvestment", { ...data.segregatedFundInvestment, selectedInsuranceCompany: v });
   const companies = [
     { value: "Manulife",       en: "Manulife", desc: "Manulife Segregated Fund Solutions  -  Investor Profile Questionnaire" },
-    { value: "iA Financial",   en: "iA",       desc: "iA Financial Group  -  Your Investor Profile (F51-122A)" },
+    { value: "iA Financial",   en: "iA Financial", desc: "iA Financial Group  -  Your Investor Profile (F51-122A)" },
     { value: "Canada Life",    en: "Canada Life", desc: "Canada Life  -  Investment Personality Questionnaire" },
     { value: "Equitable Life", en: "Equitable",   desc: "Equitable  -  Investor Profile Questionnaire" },
   ];
@@ -2509,7 +2469,7 @@ const AdvisorDisclosurePdf = ({ ad }) => (
       </PdfSection>
       <PdfSection title="Companies I represent">
         <PdfText>I represent the following insurers to market their products which include life insurance, critical illness insurance, disability insurance, travel insurance, group insurance, and segregated funds through Citistar Financial Services Ltd., a Managing General Agency (MGA):</PdfText>
-        <PdfTable headers={["Name of Business / Insurance Carriers"]} rows={[["CANADA LIFE"],["MANULIFE"],["SUN LIFE"],["EQUITABLE LIFE"],["IA"]]}/>
+        <PdfTable headers={["Name of Business / Insurance Carriers"]} rows={[["CANADA LIFE"],["MANULIFE"],["SUN LIFE"],["EQUITABLE LIFE"],["iA Financial"]]}/>
         <PdfText>For my other occupation, I have a business relationship with <b><i>1264670 BC Ltd. and J Yuan Holding Ltd.</i></b> Under this arrangement, I provide <b><i>Mutual Funds &amp; Exempt market services through 1264670 BC Ltd.</i></b> Compensation for these services is <b>commission-based.</b> I have an ownership interest <b><i>in both 1264670 BC Ltd. and J Yuan Holding Ltd.</i></b></PdfText>
       </PdfSection>
       <PdfSection title="Nature of relationship with insurance company(ies) I represent">
@@ -3246,11 +3206,6 @@ const ReviewAndGeneratePDF = ({ data, goToStep }) => {
   };
 
   const downloadPdf = async () => {
-    const missingClientNames = getRequiredClientNameErrors(data);
-    if (missingClientNames.length) {
-      alert("Please complete required client name fields before generating PDF:\n\n" + missingClientNames.join("\n"));
-      return;
-    }
     setGenerating(true);
     try {
       const pdf = await buildPdf();
@@ -3267,8 +3222,6 @@ const ReviewAndGeneratePDF = ({ data, goToStep }) => {
   };
 
   const getPdfBlob = async () => {
-    const missingClientNames = getRequiredClientNameErrors(data);
-    if (missingClientNames.length) throw new Error("Please complete required client name fields before sending:\n" + missingClientNames.join("\n"));
     const pdf = await buildPdf();
     return pdf.output("blob");
   };
@@ -3869,7 +3822,6 @@ const App = () => {
 
   const currentStep = steps[currentStepIdx];
   const stepKey = currentStep?.key;
-  const currentClientNameErrors = getCurrentStepClientNameErrors(formData, stepKey);
 
   const renderStep = () => {
     switch (stepKey) {
@@ -3893,7 +3845,6 @@ const App = () => {
     if (stepKey === "businessType" && !formData.businessType) return false;
     if (stepKey === "leverageSelection" && !formData.segregatedFundInvestment.leverageLoan) return false;
     if (stepKey === "insuranceSelection" && !formData.segregatedFundInvestment.selectedInsuranceCompany) return false;
-    if (currentClientNameErrors.length) return false;
     return true;
   };
 
@@ -3995,12 +3946,6 @@ const App = () => {
             <div className="form-card p-6 md:p-10">
               {renderStep()}
             </div>
-            {currentClientNameErrors.length > 0 && (
-              <div className="validation-alert mt-4 no-print">
-                {currentClientNameErrors[0]}
-              </div>
-            )}
-
             {/* ===== Step navigation buttons ===== */}
             <div className="mt-8 flex flex-col md:flex-row md:items-center md:justify-between gap-3 no-print">
               <div>
