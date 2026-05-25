@@ -32,7 +32,7 @@ services:
       triton-kyc-app:
         condition: service_healthy
     volumes:
-      - ./cloudflared:/etc/cloudflared:ro
+      - /volume1/docker/cloudflared/triton-kyc:/etc/cloudflared:ro
 
 volumes:
   triton_kyc_node_modules:
