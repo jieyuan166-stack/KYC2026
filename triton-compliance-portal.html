@@ -539,6 +539,11 @@ const makeDebtRow = (row = {}) => ({
 const makeReasonWhy = (row = {}) => ({
   include: row.include !== false,
   accountType: row.accountType || "",
+  generatedAccountType: row.generatedAccountType || "",
+  sections: Array.isArray(row.sections) ? row.sections.map(section => ({
+    title: section.title || "",
+    body: section.body || "",
+  })) : [],
 });
 
 function normalizeFormData(formData) {
@@ -720,6 +725,8 @@ const initialFormData = {
     reasonWhy: {
       include: true,
       accountType: "",
+      generatedAccountType: "",
+      sections: [],
     },
     insuranceQuestionnaire: {
       manulife: {
@@ -2602,6 +2609,24 @@ const reasonWhyCopy = (ctx) => {
   };
   return base[ctx.accountType] || null;
 };
+const generateReasonWhySections = (data) => {
+  const ctx = reasonWhyContext(data);
+  const copy = reasonWhyCopy(ctx);
+  if (!copy) return [];
+  const greetingName = ctx.accountType === "Spousal RRSP" ? (ctx.householdName || ctx.clientName) : ctx.clientName;
+  return [
+    { title: "Date", body: ctx.date },
+    { title: "Greeting", body: `Dear ${greetingName},` },
+    { title: "Recommendation", body: copy.recommendation },
+    { title: "Your Stated Needs & Objectives", body: copy.objectives },
+    { title: "How This Recommendation Meets Your Needs", body: copy.meets },
+    { title: "Disclosures", body: "Prior to the signing of your application, I provided you with the Fund Facts document for each segregated fund selected, as well as the Information Folder and Contract for this segregated fund contract. We reviewed the key features, risks, guarantees, fees, and rescission rights described in those documents. Digital copies were sent to you by email; please let me know if you have not received them so I can provide duplicates for your records." },
+    { title: "Risk Disclosures", body: "Segregated fund contracts are issued by an insurance company. They are not deposits and are not insured by the Canada Deposit Insurance Corporation (CDIC) or any other government deposit insurer. Although there is a degree of consumer protection provided by Assuris within prescribed limits, the value of the contract is not guaranteed by the Government of Canada or any provincial deposit insurer.\n\nThe market value of your contract will fluctuate based on changes in the unit values of the underlying funds. Maturity and death benefit guarantees apply only as described in the Information Folder and Contract; withdrawals made before maturity may proportionately reduce guaranteed amounts. Past performance of any fund is not a reliable indicator of future results." },
+    { title: "Alternatives Considered", body: copy.alternatives },
+    { title: "Important Notice", body: "If any of the information about you or your needs described in this letter is not correct, please contact me right away so we can update our records and reassess the suitability of this recommendation.\n\nIf you have any questions about the policy, your investments, the guarantees, the fees, or why I am recommending this solution, please do not hesitate to ask me now or at any time in the future. I encourage you to keep this letter with your contract and policy documents as a permanent record of why you have purchased this product and the rationale behind the recommendation.\n\nI will continue to review your contract with you periodically to ensure it remains aligned with your evolving financial circumstances, goals, and risk tolerance. If your personal or financial situation changes in a material way, please contact me so we can reassess your needs.\n\nI truly appreciate the trust and confidence you have placed in me. Thank you again for choosing me as your insurance and investment advisor." },
+    { title: "Client Acknowledgement", body: "I acknowledge that I have reviewed this Reason Why Letter and understand the rationale for the recommendation described above." },
+  ];
+};
 
 /* ============================================================
    INLINE SIGNATURE / DATE / INITIAL PLACEHOLDER
@@ -2637,6 +2662,13 @@ const SigBlock = ({ name, role }) => (
     )}
     <SigPlaceholder kind="signature" label="Signature"/>
     <SigPlaceholder kind="date" label="Date"/>
+  </div>
+);
+
+const ReasonWhyPdfSection = ({ title, children }) => (
+  <div style={{ marginTop: 14 }}>
+    <div style={{ color: TEXT_COLOR, fontSize: PDF_TYPE.section, fontWeight: 700, letterSpacing: 0.05, marginBottom: 5 }}>{title}</div>
+    <div>{children}</div>
   </div>
 );
 
@@ -3102,56 +3134,44 @@ const EquitableQpdf = ({ q }) => (
 /* --------- Reason Why Letter  -  Segregated Funds --------- */
 const ReasonWhyPdf = ({ data }) => {
   const ctx = reasonWhyContext(data);
-  const copy = reasonWhyCopy(ctx);
-  if (!copy) return null;
+  const sections = makeReasonWhy(data.segregatedFundInvestment?.reasonWhy).sections.filter(section => hasText(section.title) || hasText(section.body));
+  if (!sections.length) return null;
   const contractTitle = `${ctx.company} Segregated Fund Contract - ${ctx.accountLabel}`;
+  const sectionMap = sections.reduce((acc, section) => ({ ...acc, [section.title]: section.body }), {});
+  const SectionText = ({ title }) => (
+    <ReasonWhyPdfSection title={title}>
+      <PdfText>{sectionMap[title] || " "}</PdfText>
+    </ReasonWhyPdfSection>
+  );
   return (
     <>
       <PdfPage>
         <PdfHeader title="Reason Why Letter" subtitle={contractTitle} pageLabel="Reason Why Letter" />
         <div style={{ marginTop: 14, fontSize: PDF_TYPE.body, color: TEXT_COLOR, lineHeight: 1.62 }}>
-          <PdfText>{ctx.date}</PdfText>
-          <PdfText>Dear <b>{ctx.accountType === "Spousal RRSP" ? (ctx.householdName || ctx.clientName) : ctx.clientName}</b>,</PdfText>
+          <PdfText>{sectionMap.Date || ctx.date}</PdfText>
+          <PdfText>{sectionMap.Greeting || `Dear ${ctx.clientName},`}</PdfText>
         </div>
-        <PdfSection title="Recommendation">
-          <PdfText>{copy.recommendation}</PdfText>
-        </PdfSection>
-        <PdfSection title="Your Stated Needs & Objectives">
-          <PdfText>{copy.objectives}</PdfText>
-        </PdfSection>
-        <PdfSection title="How This Recommendation Meets Your Needs">
-          <PdfText>{copy.meets}</PdfText>
-        </PdfSection>
+        <SectionText title="Recommendation"/>
+        <SectionText title="Your Stated Needs & Objectives"/>
+        <SectionText title="How This Recommendation Meets Your Needs"/>
       </PdfPage>
       <PdfPage>
         <PdfHeader title="Reason Why Letter" subtitle={contractTitle} pageLabel="Reason Why Letter continued" />
-        <PdfSection title="Disclosures">
-          <PdfText>Prior to the signing of your application, I provided you with the Fund Facts document for each segregated fund selected, as well as the Information Folder and Contract for this segregated fund contract. We reviewed the key features, risks, guarantees, fees, and rescission rights described in those documents. Digital copies were sent to you by email; please let me know if you have not received them so I can provide duplicates for your records.</PdfText>
-        </PdfSection>
-        <PdfSection title="Risk Disclosures">
-          <PdfText>Segregated fund contracts are issued by an insurance company. They are not deposits and are not insured by the Canada Deposit Insurance Corporation (CDIC) or any other government deposit insurer. Although there is a degree of consumer protection provided by Assuris within prescribed limits, the value of the contract is not guaranteed by the Government of Canada or any provincial deposit insurer.</PdfText>
-          <PdfText>The market value of your contract will fluctuate based on changes in the unit values of the underlying funds. Maturity and death benefit guarantees apply only as described in the Information Folder and Contract; withdrawals made before maturity may proportionately reduce guaranteed amounts. Past performance of any fund is not a reliable indicator of future results.</PdfText>
-        </PdfSection>
-        <PdfSection title="Alternatives Considered">
-          <PdfText>{copy.alternatives}</PdfText>
-        </PdfSection>
+        <SectionText title="Disclosures"/>
+        <SectionText title="Risk Disclosures"/>
+        <SectionText title="Alternatives Considered"/>
       </PdfPage>
       <PdfPage>
         <PdfHeader title="Reason Why Letter" subtitle={contractTitle} pageLabel="Reason Why Letter acknowledgement" />
-        <PdfSection title="Important Notice">
-          <PdfText>If any of the information about you or your needs described in this letter is not correct, please contact me right away so we can update our records and reassess the suitability of this recommendation.</PdfText>
-          <PdfText>If you have any questions about the policy, your investments, the guarantees, the fees, or why I am recommending this solution, please do not hesitate to ask me now or at any time in the future. I encourage you to keep this letter with your contract and policy documents as a permanent record of why you have purchased this product and the rationale behind the recommendation.</PdfText>
-          <PdfText>I will continue to review your contract with you periodically to ensure it remains aligned with your evolving financial circumstances, goals, and risk tolerance. If your personal or financial situation changes in a material way, please contact me so we can reassess your needs.</PdfText>
-          <PdfText>I truly appreciate the trust and confidence you have placed in me. Thank you again for choosing me as your insurance and investment advisor.</PdfText>
-        </PdfSection>
-        <PdfSection title="Client Acknowledgement">
-          <PdfText>I acknowledge that I have reviewed this Reason Why Letter and understand the rationale for the recommendation described above.</PdfText>
+        <SectionText title="Important Notice"/>
+        <ReasonWhyPdfSection title="Client Acknowledgement">
+          <PdfText>{sectionMap["Client Acknowledgement"] || "I acknowledge that I have reviewed this Reason Why Letter and understand the rationale for the recommendation described above."}</PdfText>
           <div style={{ marginTop: 14, padding: 12, background: "#FAFAF6", borderLeft: "3px solid " + GOLD }}>
             <div style={{ fontSize: PDF_TYPE.label, color: NAVY, letterSpacing: 0.65, textTransform: "uppercase", fontWeight: 650, marginBottom: 8 }}>{ctx.clientName}</div>
             <SigPlaceholder kind="signature" signer="signer2" label="Client Signature" width={240}/>
             <SigPlaceholder kind="date" signer="signer2" label="Date" width={130}/>
           </div>
-        </PdfSection>
+        </ReasonWhyPdfSection>
       </PdfPage>
     </>
   );
@@ -3486,6 +3506,9 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
       if (rw.include !== false && !rw.accountType) {
         throw new Error("Please select a Reason Why Letter account type before downloading the PDF.");
       }
+      if (rw.include !== false && rw.accountType && !rw.sections.length) {
+        throw new Error("Please generate the Reason Why Letter preview before downloading the PDF.");
+      }
     }
     const { jsPDF } = window.jspdf;
     const node = printableRef.current.querySelector(".pdf-content");
@@ -3544,7 +3567,40 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
     ...sf,
     reasonWhy: { ...reasonWhy, ...patch },
   });
+  const setReasonWhyAccountType = (accountType) => {
+    const nextReasonWhy = { ...reasonWhy, accountType };
+    if (accountType && !reasonWhy.sections.length) {
+      nextReasonWhy.sections = generateReasonWhySections({
+        ...data,
+        segregatedFundInvestment: { ...sf, reasonWhy: { ...reasonWhy, accountType } },
+      });
+      nextReasonWhy.generatedAccountType = accountType;
+    }
+    setReasonWhy(nextReasonWhy);
+  };
+  const regenerateReasonWhy = () => {
+    if (!reasonWhy.accountType) {
+      alert("Please select a Reason Why Letter account type first.");
+      return;
+    }
+    setReasonWhy({
+      sections: generateReasonWhySections(data),
+      generatedAccountType: reasonWhy.accountType,
+    });
+  };
+  const updateReasonWhySection = (idx, key, value) => {
+    const sections = reasonWhy.sections.map((section, i) => i === idx ? { ...section, [key]: value } : section);
+    setReasonWhy({ sections });
+  };
   const reasonWhyCtx = reasonWhyContext(data);
+  useEffect(() => {
+    if (data.businessType !== "Segregated Fund Investment") return;
+    if (!reasonWhy.accountType || reasonWhy.sections.length) return;
+    setReasonWhy({
+      sections: generateReasonWhySections(data),
+      generatedAccountType: reasonWhy.accountType,
+    });
+  }, [data.businessType, reasonWhy.accountType, reasonWhy.sections.length]);
   const li = data.lifeInsurance.needsAnalysis;
   const isSegFund = data.businessType === "Segregated Fund Investment";
   const isLifeIns = data.businessType === "Life Insurance";
@@ -3657,12 +3713,32 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
                 <Checkbox checked={reasonWhy.include !== false} onChange={v => setReasonWhy({ include: v })} label="Generate Reason Why Letter in PDF"/>
               </Field>
               <Field label="Account type" required>
-                <Select value={reasonWhy.accountType} onChange={v => setReasonWhy({ accountType: v })} options={REASON_WHY_ACCOUNT_OPTIONS}/>
+                <Select value={reasonWhy.accountType} onChange={setReasonWhyAccountType} options={REASON_WHY_ACCOUNT_OPTIONS}/>
               </Field>
             </div>
             <ReviewSummaryRow label="Company" value={reasonWhyCtx.company}/>
             <ReviewSummaryRow label="Client name" value={reasonWhyCtx.clientName}/>
             <ReviewSummaryRow label="Investment amount" value={reasonWhyCtx.investmentAmount}/>
+            <div className="flex flex-wrap items-center gap-2 mt-3 mb-2">
+              <button type="button" onClick={regenerateReasonWhy} className="px-3 py-2 border border-navy text-navy rounded hover:bg-navy hover:text-white text-xs font-semibold">Regenerate from template</button>
+              {reasonWhy.generatedAccountType && <span className="text-xs text-gray-500">Generated from: {reasonWhyLabel(reasonWhy.generatedAccountType)}</span>}
+            </div>
+            {reasonWhy.sections.length > 0 ? (
+              <div className="space-y-3 mt-3">
+                {reasonWhy.sections.map((section, idx) => (
+                  <div key={idx} className="border border-gray-200 rounded p-3 bg-gray-50">
+                    <Field label="Section title">
+                      <TextInput value={section.title} onChange={v => updateReasonWhySection(idx, "title", v)}/>
+                    </Field>
+                    <Field label="Section text">
+                      <TextArea value={section.body} onChange={v => updateReasonWhySection(idx, "body", v)} rows={idx >= 6 ? 5 : 3}/>
+                    </Field>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-3">Select an account type to generate an editable Reason Why Letter preview.</div>
+            )}
             <div className="mt-2 text-xs text-gray-600">PDF will include client signature and date boxes only. Advisor signature is not included on this letter.</div>
           </ReviewPanel>
         )}
