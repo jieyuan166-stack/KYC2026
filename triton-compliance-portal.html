@@ -3730,7 +3730,8 @@ const App = () => {
       if (!value || manual[path]) return;
       const current = getPath(nextFormData, path) || "";
       const previousAuto = previousTargetValues[path] || "";
-      if (!current || current === previousAuto) {
+      const looksLikePartialAutoFill = current && value.startsWith(current) && current.length < value.length;
+      if (!current || current === previousAuto || looksLikePartialAutoFill) {
         nextFormData = setPathImmutable(nextFormData, path, value);
         changed = true;
       }
