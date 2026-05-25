@@ -3760,7 +3760,40 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
   const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [attachmentError, setAttachmentError] = useState("");
 
-  // Builds a multi-page PDF by rasterising each .pdf-page element separately.
+  const renderHtmlPageToPdf = (pdf, pageEl, pageWmm) => new Promise((resolve, reject) => {
+    try {
+      pdf.html(pageEl, {
+        x: 0,
+        y: 0,
+        width: pageWmm,
+        windowWidth: pageEl.offsetWidth,
+        autoPaging: false,
+        html2canvas: {
+          scale: 1,
+          useCORS: true,
+          backgroundColor: "#ffffff",
+          logging: false,
+        },
+        callback: () => resolve(),
+      });
+    } catch (err) {
+      reject(err);
+    }
+  });
+  const renderRasterFallbackPage = async (pdf, pageEl, pageWmm, pageHmm) => {
+    const canvas = await html2canvas(pageEl, { scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false });
+    const imgData = canvas.toDataURL("image/jpeg", 0.98);
+    const imgW = pageWmm;
+    const imgH = (canvas.height * imgW) / canvas.width;
+    if (imgH > pageHmm) {
+      const scaledW = (imgW * pageHmm) / imgH;
+      pdf.addImage(imgData, "JPEG", (pageWmm - scaledW) / 2, 0, scaledW, pageHmm, undefined, "FAST");
+    } else {
+      pdf.addImage(imgData, "JPEG", 0, 0, imgW, imgH, undefined, "FAST");
+    }
+  };
+
+  // Builds a multi-page PDF with jsPDF's HTML renderer so text stays sharp/selectable.
   const buildPdf = async () => {
     if (effectivePdfData.businessType === "Segregated Fund Investment") {
       const rw = makeReasonWhy(effectivePdfData.segregatedFundInvestment.reasonWhy);
@@ -3783,16 +3816,11 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
       if (i > 0) pdf.addPage("letter", pageOrientation);
       const pageWmm = pdf.internal.pageSize.getWidth();
       const pageHmm = pdf.internal.pageSize.getHeight();
-      const canvas = await html2canvas(pageEl, { scale: 4, useCORS: true, backgroundColor: "#ffffff" });
-      const imgData = canvas.toDataURL("image/png");
-      const imgW = pageWmm;
-      const imgH = (canvas.height * imgW) / canvas.width;
-      // Fit-to-width; if too tall, scale down to fit page
-      if (imgH > pageHmm) {
-        const scaledW = (imgW * pageHmm) / imgH;
-        pdf.addImage(imgData, "PNG", (pageWmm - scaledW) / 2, 0, scaledW, pageHmm, undefined, "NONE");
-      } else {
-        pdf.addImage(imgData, "PNG", 0, 0, imgW, imgH, undefined, "NONE");
+      try {
+        await renderHtmlPageToPdf(pdf, pageEl, pageWmm);
+      } catch (err) {
+        console.warn("[pdf] Vector HTML render failed for page, using raster fallback:", err);
+        await renderRasterFallbackPage(pdf, pageEl, pageWmm, pageHmm);
       }
     }
 
