@@ -9,3 +9,5 @@ backups/
 .claude/
 .vscode/
 .kiro/
+docker/cloudflared/config.yml
+docker/cloudflared/*.json

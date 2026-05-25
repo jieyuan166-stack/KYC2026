@@ -1,0 +1,38 @@
+services:
+  triton-kyc-app:
+    image: node:20-alpine
+    container_name: triton-kyc-app
+    restart: unless-stopped
+    working_dir: /app/server
+    command: sh -c "npm ci --omit=dev || npm install --omit=dev; node server.js"
+    env_file:
+      - ../server/.env
+    environment:
+      PORT: "3000"
+      ALLOWED_ORIGINS: "https://kyc.tritonwealth.ca,http://localhost:3000"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ..:/app
+      - triton_kyc_node_modules:/app/server/node_modules
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 30s
+
+  triton-kyc-tunnel:
+    image: cloudflare/cloudflared:2026.5.0
+    container_name: triton-kyc-tunnel
+    restart: unless-stopped
+    user: "0:0"
+    command: tunnel --config /etc/cloudflared/config.yml run TRITON-KYC
+    depends_on:
+      triton-kyc-app:
+        condition: service_healthy
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro
+
+volumes:
+  triton_kyc_node_modules:

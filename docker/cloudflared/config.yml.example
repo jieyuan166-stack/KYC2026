@@ -1,0 +1,7 @@
+tunnel: d6596ab1-4853-4816-900c-b6e7ef52fbfc
+credentials-file: /etc/cloudflared/d6596ab1-4853-4816-900c-b6e7ef52fbfc.json
+
+ingress:
+  - hostname: kyc.tritonwealth.ca
+    service: http://triton-kyc-app:3000
+  - service: http_status:404
