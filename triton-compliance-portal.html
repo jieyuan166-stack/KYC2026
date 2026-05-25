@@ -378,6 +378,12 @@ const AUTH_PASSWORD_HASH = "b4d892dcdd1c8a38a97f6cfcac5bf20075d10947cd9cde9d41e1
 const STORAGE_KEY_LEGACY = "triton_compliance_draft_v1";   // single object (kept for migration)
 const STORAGE_KEY        = "triton_compliance_drafts_v2";  // array of drafts
 const DEFAULT_ADVISOR_NAME = "Jie Yuan";
+const todayISO = () => {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+};
 
 const loadDraftsList = () => {
   try {
@@ -492,6 +498,11 @@ function normalizeFormData(formData) {
   const fd = deepClone(formData || initialFormDataRef.current || {});
   fd.smartFill = fd.smartFill || { manual: {}, lastPrimaryName: "", lastSpouseName: "" };
   fd.smartFill.manual = fd.smartFill.manual || {};
+  fd.advisorDisclosure = fd.advisorDisclosure || {};
+  if (!hasText(fd.advisorDisclosure.client1Date)) fd.advisorDisclosure.client1Date = todayISO();
+  if ((fd.advisorDisclosure.spouseConsent || hasText(fd.advisorDisclosure.client2Name)) && !hasText(fd.advisorDisclosure.client2Date)) {
+    fd.advisorDisclosure.client2Date = todayISO();
+  }
 
   const lc = fd.segregatedFundInvestment?.leverageCompliance;
   if (lc) {
@@ -814,6 +825,30 @@ const buildSteps = (data) => {
 const AdvisorDisclosureForm = ({ data, update }) => {
   const d = data.advisorDisclosure;
   const set = (k, v) => update("advisorDisclosure", { ...d, [k]: v });
+  const setAcknowledgementName = (v) => {
+    const previousAckName = d.clientName || "";
+    update("advisorDisclosure", {
+      ...d,
+      clientName: v,
+      client1Name: (!hasText(d.client1Name) || d.client1Name === previousAckName) ? v : d.client1Name,
+      client1Date: d.client1Date || todayISO(),
+    });
+  };
+  const setClient1Name = (v) => {
+    update("advisorDisclosure", {
+      ...d,
+      client1Name: v,
+      clientName: (!hasText(d.clientName) || d.clientName === d.client1Name) ? v : d.clientName,
+      client1Date: d.client1Date || todayISO(),
+    });
+  };
+  const setSpouseConsent = (v) => {
+    update("advisorDisclosure", {
+      ...d,
+      spouseConsent: v,
+      client2Date: v && !d.client2Date ? todayISO() : d.client2Date,
+    });
+  };
   return (
     <div className="space-y-6">
       <header className="text-center pb-4 border-b border-gray-200">
@@ -895,15 +930,15 @@ const AdvisorDisclosureForm = ({ data, update }) => {
         <h3 className="text-lg font-bold text-navy mb-3">Acknowledgment and Consent</h3>
         <div className="text-sm text-gray-700 mb-3">
           <span>I, </span>
-          <input type="text" value={d.clientName} onChange={e => set("clientName", e.target.value)} placeholder="(Client Name)" className="inline-block max-w-xs mx-1" style={{display:"inline-block", width:"250px"}}/>
+          <input type="text" value={d.clientName} onChange={e => setAcknowledgementName(e.target.value)} placeholder="(Client Name)" className="inline-block max-w-xs mx-1" style={{display:"inline-block", width:"250px"}}/>
           <span> (Client Name)<span className="text-red-700 font-semibold"> *</span> acknowledge that I have reviewed this document. I understand any conflicts of interest or potential conflicts of interest outlined in this document. I also consent to a client file being created and maintained for me.</span>
         </div>
-        <Checkbox checked={d.spouseConsent} onChange={v => set("spouseConsent", v)} label="I consent to my personal information being maintained in a joint client file with my spouse and being disclosed to my spouse. Requires signature of spouse, if selected." />
+        <Checkbox checked={d.spouseConsent} onChange={setSpouseConsent} label="I consent to my personal information being maintained in a joint client file with my spouse and being disclosed to my spouse. Requires signature of spouse, if selected." />
 
         <div className="grid md:grid-cols-2 gap-6 mt-5">
           <div className="border border-gray-200 rounded p-3">
             <div className="font-semibold text-navy mb-2">Client 1</div>
-            <Field label="Client name" required><TextInput value={d.client1Name} onChange={v => set("client1Name", v)} /></Field>
+            <Field label="Client name" required><TextInput value={d.client1Name} onChange={setClient1Name} /></Field>
             <SignatureField value={d.client1Signature} onChange={v => set("client1Signature", v)} label="Client signature *" />
             <Field label="Date" required><TextInput type="date" value={d.client1Date} onChange={v => set("client1Date", v)} /></Field>
           </div>
