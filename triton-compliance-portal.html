@@ -381,7 +381,7 @@ const DEFAULT_ADVISOR_NAME = "Jie Yuan";
 const REASON_WHY_ACCOUNT_OPTIONS = [
   { value: "RRSP", label: "RRSP" },
   { value: "FHSA", label: "FHSA" },
-  { value: "TFSA Lump Sum", label: "TFSA Lump Sum" },
+  { value: "TFSA", label: "TFSA" },
   { value: "Non-Registered", label: "Non-Registered" },
   { value: "Spousal RRSP", label: "Spousal RRSP" },
 ];
@@ -536,15 +536,21 @@ const makeDebtRow = (row = {}) => ({
   balance: row.balance || "",
   monthly: row.monthly || "",
 });
-const makeReasonWhy = (row = {}) => ({
-  include: row.include !== false,
-  accountType: row.accountType || "",
-  generatedAccountType: row.generatedAccountType || "",
-  sections: Array.isArray(row.sections) ? row.sections.map(section => ({
-    title: section.title || "",
-    body: section.body || "",
-  })) : [],
-});
+const normalizeReasonWhyAccountType = (value) => value === "TFSA Lump Sum" ? "TFSA" : (value || "");
+const makeReasonWhy = (row = {}) => {
+  const legacySections = Array.isArray(row.sections)
+    ? row.sections
+        .map(section => [section.title, section.body].filter(hasText).join("\n"))
+        .filter(hasText)
+        .join("\n\n")
+    : "";
+  return {
+    include: row.include !== false,
+    accountType: normalizeReasonWhyAccountType(row.accountType),
+    generatedAccountType: normalizeReasonWhyAccountType(row.generatedAccountType),
+    body: row.body || legacySections || "",
+  };
+};
 
 function normalizeFormData(formData) {
   const fd = deepClone(formData || initialFormDataRef.current || {});
@@ -726,7 +732,7 @@ const initialFormData = {
       include: true,
       accountType: "",
       generatedAccountType: "",
-      sections: [],
+      body: "",
     },
     insuranceQuestionnaire: {
       manulife: {
@@ -2542,7 +2548,7 @@ const fmtLongDate = (v) => {
   return d.toLocaleDateString("en-CA", { year: "numeric", month: "long", day: "numeric" });
 };
 const companyDisplayName = (company) => company === "iA Financial" ? "iA FINANCIAL" : (company || "the selected insurance company");
-const reasonWhyLabel = (value) => REASON_WHY_ACCOUNT_OPTIONS.find(o => o.value === value)?.label || value || "";
+const reasonWhyLabel = (value) => REASON_WHY_ACCOUNT_OPTIONS.find(o => o.value === normalizeReasonWhyAccountType(value))?.label || normalizeReasonWhyAccountType(value) || "";
 const parseGuarantee = (value) => {
   const match = String(value || "").match(/(\d+)\s*\/\s*(\d+)/);
   return match ? { maturity: match[1], death: match[2] } : null;
@@ -2562,7 +2568,7 @@ const reasonWhyContext = (data) => {
   const amountRaw = sf.leverageLoan === "yes" ? lc.principalLoan : nl.amountToInvest;
   return {
     company: companyDisplayName(sf.selectedInsuranceCompany),
-    accountType: sf.reasonWhy?.accountType || "",
+    accountType: normalizeReasonWhyAccountType(sf.reasonWhy?.accountType),
     accountLabel: reasonWhyLabel(sf.reasonWhy?.accountType),
     date: fmtLongDate(todayISO()),
     clientName,
@@ -2570,62 +2576,36 @@ const reasonWhyContext = (data) => {
     householdName: [clientName, client2Name].filter(Boolean).join(" and "),
     investmentAmount: fmtMoney(amountRaw) || "the contribution amount discussed",
     guaranteeText: guaranteeSentence(nl.guarantee),
+    maturityGuarantee: parseGuarantee(nl.guarantee)?.maturity || "contractual",
+    deathBenefitGuarantee: parseGuarantee(nl.guarantee)?.death || "contractual",
     riskProfile: nl.riskProfile || lc.investmentObjectives || "the risk tolerance documented in your Know-Your-Client profile",
     timeHorizon: nl.timeHorizon || lc.timeHorizon || "your documented investment time horizon",
   };
 };
-const reasonWhyCopy = (ctx) => {
-  const base = {
-    RRSP: {
-      recommendation: `Based on our recent meeting and the financial needs analysis we completed together, I am recommending that you establish a Registered Retirement Savings Plan (RRSP) under a segregated fund contract with ${ctx.company}. The contribution amount is ${ctx.investmentAmount}.`,
-      objectives: "Your stated objectives are to reduce current taxable income through an RRSP contribution, grow retirement savings on a tax-deferred basis over a long-term horizon, protect contributed capital through contractual guarantees, and keep the retirement plan aligned with your documented risk tolerance.",
-      meets: `An RRSP segregated fund contract addresses these objectives by combining the tax advantages of an RRSP with insurance-contract features. Your contribution may generate a tax deduction, investment growth accumulates tax-deferred until withdrawal, and ${ctx.guaranteeText} Based on ${ctx.timeHorizon} and ${ctx.riskProfile}, the recommended segregated funds are intended to support long-term retirement growth while retaining flexibility to switch between available funds as circumstances change.`,
-      alternatives: "We discussed alternatives including non-registered investments and a traditional RRSP held outside an insurance contract. The segregated fund RRSP was recommended because it combines RRSP tax treatment with maturity and death benefit guarantees and estate-planning features available through an insurance contract.",
-    },
-    FHSA: {
-      recommendation: `Based on our recent meeting and the financial needs analysis we completed together, I am recommending that you establish a First Home Savings Account (FHSA) under a segregated fund contract with ${ctx.company}. The contribution amount is ${ctx.investmentAmount}.`,
-      objectives: "Your stated objective is to save toward a first qualifying home in a tax-efficient way while maintaining an investment structure that is consistent with your time horizon and comfort with market risk.",
-      meets: `The FHSA combines a contribution-side tax deduction with tax-free qualifying withdrawals for a first home purchase. The segregated fund contract adds insurance-contract features, and ${ctx.guaranteeText} Based on ${ctx.timeHorizon} and ${ctx.riskProfile}, the recommended funds are intended to support your home-purchase savings goal while recognizing the need for downside protection and flexibility as your timeline approaches.`,
-      alternatives: "We discussed alternatives such as using a TFSA, using the Home Buyers' Plan through an RRSP, or holding savings in a deposit product. The FHSA was recommended because it directly supports first-home savings and provides tax treatment that is specifically designed for this goal.",
-    },
-    "TFSA Lump Sum": {
-      recommendation: `Based on our recent meeting and the financial needs analysis we completed together, I am recommending that you make a lump-sum deposit of ${ctx.investmentAmount} into a Tax-Free Savings Account (TFSA) under a segregated fund contract with ${ctx.company}.`,
-      objectives: "Your stated objectives are to invest available savings in a tax-free account, preserve flexibility for future withdrawals, grow the assets over time, and use a structure that provides contractual downside protection.",
-      meets: `A TFSA provides tax-free growth and tax-free withdrawals. The segregated fund contract enhances the recommendation with insurance-contract features, and ${ctx.guaranteeText} Because this is a lump-sum deposit, the full contribution can begin participating in the selected investment portfolio immediately, subject to market fluctuation and the terms of the contract.`,
-      alternatives: "We discussed alternatives including a high-interest savings account, a GIC, and a non-registered investment account. The segregated fund TFSA was recommended because it combines TFSA tax treatment with maturity and death benefit guarantees available through an insurance contract.",
-    },
-    "Non-Registered": {
-      recommendation: `Based on our recent meeting and the financial needs analysis we completed together, I am recommending that you establish a Non-Registered account under a segregated fund contract with ${ctx.company}. The contribution amount is ${ctx.investmentAmount}.`,
-      objectives: "Your stated objectives are to continue building investment wealth outside registered plans, maintain an investment approach that reflects your documented risk tolerance, and use an insurance-contract structure that may support estate and creditor-protection planning where applicable.",
-      meets: `The Non-Registered segregated fund contract allows you to invest beyond registered account limits while using a structure that offers insurance-contract features. ${ctx.guaranteeText} Based on ${ctx.timeHorizon} and ${ctx.riskProfile}, the recommended portfolio is intended to support long-term wealth building while retaining flexibility to adjust fund selections as your needs evolve.`,
-      alternatives: "We discussed alternatives including traditional non-registered mutual fund accounts, GICs, and direct ownership of securities. The segregated fund contract was recommended because it provides insurance-contract features that are not available through ordinary investment accounts.",
-    },
-    "Spousal RRSP": {
-      recommendation: `Based on our recent meeting and the financial needs analysis we completed together, I am recommending that ${ctx.householdName || ctx.clientName} establish a Spousal Registered Retirement Savings Plan (Spousal RRSP) under a segregated fund contract with ${ctx.company}. The contribution amount is ${ctx.investmentAmount}.`,
-      objectives: "Your household objectives are to build retirement savings, support future retirement income planning between spouses, protect contributed capital through contractual guarantees, and keep the recommendation aligned with your documented risk tolerance and time horizon.",
-      meets: `A Spousal RRSP can help a household direct retirement savings toward a spouse and may support retirement income planning over time. The segregated fund contract adds insurance-contract features, and ${ctx.guaranteeText} I have also reviewed that Spousal RRSP withdrawals may be subject to attribution rules when withdrawals occur within the same calendar year as a contribution or within either of the following two calendar years.`,
-      alternatives: "We discussed alternatives such as each spouse contributing separately to individual RRSPs and using other retirement income planning strategies. The Spousal RRSP was recommended because it can support household retirement planning while adding segregated fund contract features.",
-    },
-  };
-  return base[ctx.accountType] || null;
-};
-const generateReasonWhySections = (data) => {
+const stripTemplatePlaceholders = (text) => String(text || "")
+  .replace(/\{\{[^}]+\}\}/g, "")
+  .replace(/[ \t]+\n/g, "\n")
+  .replace(/\n{3,}/g, "\n\n")
+  .trim();
+const generateReasonWhyBody = (data) => {
   const ctx = reasonWhyContext(data);
-  const copy = reasonWhyCopy(ctx);
-  if (!copy) return [];
   const greetingName = ctx.accountType === "Spousal RRSP" ? (ctx.householdName || ctx.clientName) : ctx.clientName;
-  return [
-    { title: "Date", body: ctx.date },
-    { title: "Greeting", body: `Dear ${greetingName},` },
-    { title: "Recommendation", body: copy.recommendation },
-    { title: "Your Stated Needs & Objectives", body: copy.objectives },
-    { title: "How This Recommendation Meets Your Needs", body: copy.meets },
-    { title: "Disclosures", body: "Prior to the signing of your application, I provided you with the Fund Facts document for each segregated fund selected, as well as the Information Folder and Contract for this segregated fund contract. We reviewed the key features, risks, guarantees, fees, and rescission rights described in those documents. Digital copies were sent to you by email; please let me know if you have not received them so I can provide duplicates for your records." },
-    { title: "Risk Disclosures", body: "Segregated fund contracts are issued by an insurance company. They are not deposits and are not insured by the Canada Deposit Insurance Corporation (CDIC) or any other government deposit insurer. Although there is a degree of consumer protection provided by Assuris within prescribed limits, the value of the contract is not guaranteed by the Government of Canada or any provincial deposit insurer.\n\nThe market value of your contract will fluctuate based on changes in the unit values of the underlying funds. Maturity and death benefit guarantees apply only as described in the Information Folder and Contract; withdrawals made before maturity may proportionately reduce guaranteed amounts. Past performance of any fund is not a reliable indicator of future results." },
-    { title: "Alternatives Considered", body: copy.alternatives },
-    { title: "Important Notice", body: "If any of the information about you or your needs described in this letter is not correct, please contact me right away so we can update our records and reassess the suitability of this recommendation.\n\nIf you have any questions about the policy, your investments, the guarantees, the fees, or why I am recommending this solution, please do not hesitate to ask me now or at any time in the future. I encourage you to keep this letter with your contract and policy documents as a permanent record of why you have purchased this product and the rationale behind the recommendation.\n\nI will continue to review your contract with you periodically to ensure it remains aligned with your evolving financial circumstances, goals, and risk tolerance. If your personal or financial situation changes in a material way, please contact me so we can reassess your needs.\n\nI truly appreciate the trust and confidence you have placed in me. Thank you again for choosing me as your insurance and investment advisor." },
-    { title: "Client Acknowledgement", body: "I acknowledge that I have reviewed this Reason Why Letter and understand the rationale for the recommendation described above." },
-  ];
+  const guaranteeLine = ctx.maturityGuarantee === "contractual"
+    ? "contractual maturity and death benefit guarantees"
+    : `${ctx.maturityGuarantee}% Maturity Guarantee and ${ctx.deathBenefitGuarantee}% Death Benefit Guarantee`;
+  const guaranteeDisclosure = ctx.maturityGuarantee === "contractual"
+    ? "The maturity and death benefit guarantees apply as described in the Information Folder and Contract."
+    : `The ${ctx.maturityGuarantee}% Maturity Guarantee and ${ctx.deathBenefitGuarantee}% Death Benefit Guarantee apply only if the contract is held to its maturity date or paid on death; any partial withdrawals made before maturity will proportionately reduce both the maturity and death benefit guaranteed amounts.`;
+  const commonClose = `Important Notice\nIf any of the information about you or your needs described in this letter is not correct, please contact me right away so we can update our records and reassess the suitability of this recommendation.\n\nIf you have any questions about the policy, your investments, the guarantees, the fees, or why I am recommending this solution, please do not hesitate to ask me now or at any time in the future. I encourage you to keep this letter with your contract and policy documents as a permanent record of why you have purchased this product and the rationale behind the recommendation.\n\nI will continue to review your contract with you periodically to ensure it remains aligned with your evolving financial circumstances, goals, and risk tolerance. If your personal or financial situation changes in a material way, please contact me so we can reassess your needs.\n\nI truly appreciate the trust and confidence you have placed in me. Thank you again for choosing me as your insurance and investment advisor.\n\nClient Acknowledgement\nI acknowledge that I have reviewed this Reason Why Letter and understand the rationale for the recommendation described above.`;
+  const commonDisclosure = `Disclosures\nPrior to the signing of your application, I provided you with the Fund Facts document for each segregated fund selected, as well as the Information Folder and Contract for this account. We reviewed the key features, risks, guarantees, fees, and rescission rights described in those documents. Digital copies were sent to you by email; please let me know if you have not received them so I can provide duplicates for your records.\n\nRisk Disclosures\nSegregated fund contracts are issued by an insurance company. They are not deposits and are not insured by the Canada Deposit Insurance Corporation (CDIC) or any other government deposit insurer. Although there is a degree of consumer protection provided by Assuris within prescribed limits, the value of the contract is not guaranteed by the Government of Canada or any provincial deposit insurer.\n\nThe market value of your contract will fluctuate based on changes in the unit values of the underlying funds. ${guaranteeDisclosure} Past performance of any fund is not a reliable indicator of future results.`;
+  const templates = {
+    RRSP: `REASON WHY LETTER\n${ctx.company} Segregated Fund Contract - RRSP\n${ctx.date}\n\nDear ${greetingName},\n\nRecommendation\nBased on our recent meeting and the financial needs analysis we completed together, I am recommending that you establish a Registered Retirement Savings Plan (RRSP) under a segregated fund contract with ${ctx.company}. The contribution amount is ${ctx.investmentAmount}.\n\nYour Stated Needs & Objectives\nDuring our recent meeting, we reviewed your overall financial situation, long-term goals, and your comfort level with investment risk. Your primary financial objectives are to reduce your current year's taxable income through an RRSP contribution, grow your retirement savings on a tax-deferred basis over a long-term horizon, provide downside protection for your invested principal, and ensure your retirement assets are held in an insurance contract structure.\n\nHow This Recommendation Meets Your Needs\nThe ${ctx.company} RRSP segregated fund contract addresses each of these objectives. Your contribution of ${ctx.investmentAmount} may generate an immediate tax deduction against your taxable income for the year, and all investment growth within the RRSP accumulates on a tax-deferred basis until withdrawal. The segregated fund contract provides a ${guaranteeLine} on your net deposits, subject to the terms of the Information Folder and Contract.\n\nBased on your retirement time horizon and the risk tolerance documented in your Know-Your-Client profile, we selected a diversified portfolio of segregated funds aligned with your long-term growth objectives. You retain the flexibility to switch between funds available within the contract as your circumstances or market conditions change, subject to standard restrictions.\n\n${commonDisclosure}\n\nAlternatives Considered\nWe discussed alternatives including a non-registered investment account and a traditional RRSP held outside an insurance contract. The segregated fund RRSP was recommended because it combines the tax advantages of the RRSP with capital guarantees and insurance-contract features.\n\n${commonClose}`,
+    FHSA: `REASON WHY LETTER\n${ctx.company} Segregated Fund Contract - FHSA\n${ctx.date}\n\nDear ${greetingName},\n\nRecommendation\nBased on our recent meeting and the financial needs analysis we completed together, I am recommending that you establish a First Home Savings Account (FHSA) under a segregated fund contract with ${ctx.company}. The contribution amount is ${ctx.investmentAmount}.\n\nYour Stated Needs & Objectives\nDuring our recent meeting, we reviewed your eligibility for an FHSA and your objective to save for the down payment on your first qualifying home in a tax-efficient manner while protecting your contributed capital.\n\nHow This Recommendation Meets Your Needs\nThe FHSA combines the benefits of an RRSP and a TFSA: contributions may generate a tax deduction, growth within the account is tax-sheltered, and qualifying withdrawals used to purchase a first home are tax-free. The ${ctx.company} FHSA segregated fund contract additionally provides a ${guaranteeLine} on your net deposits, subject to the terms of the Information Folder and Contract.\n\nIf you do not use the FHSA to purchase a qualifying home within the permitted period, the funds may be transferable to your RRSP or RRIF on a tax-deferred basis, subject to applicable rules. Based on your planned home-purchase timeline and risk tolerance, we selected a diversified portfolio of segregated funds aligned with your savings horizon. You retain the flexibility to switch between available funds in the contract as your timeline approaches.\n\n${commonDisclosure}\n\nAlternatives Considered\nWe discussed the Home Buyers' Plan under an RRSP and a separate TFSA savings strategy. The FHSA was recommended because it provides both contribution-side tax benefits and tax-free qualifying withdrawals for a first home purchase.\n\n${commonClose}`,
+    TFSA: `REASON WHY LETTER\n${ctx.company} Segregated Fund Contract - TFSA\n${ctx.date}\n\nDear ${greetingName},\n\nRecommendation\nBased on our recent meeting and the financial needs analysis we completed together, I am recommending that you make a lump-sum deposit of ${ctx.investmentAmount} into a Tax-Free Savings Account (TFSA) under a segregated fund contract with ${ctx.company}.\n\nYour Stated Needs & Objectives\nDuring our recent meeting, we reviewed your overall financial situation, long-term goals, and your comfort level with investment risk. You confirmed that you have sufficient TFSA contribution room available and a lump sum of cash savings ready to deploy. Your primary objectives are to invest your savings in a vehicle that grows tax-free, maintain flexibility to withdraw funds tax-free, protect your principal through downside guarantees, and ensure an efficient investment structure.\n\nHow This Recommendation Meets Your Needs\nA TFSA provides tax-free growth on investment returns and tax-free withdrawals at any time, for any purpose. The ${ctx.company} segregated fund contract enhances this with a ${guaranteeLine} on your net deposits, providing meaningful downside protection through market cycles.\n\nBecause this is a lump-sum deposit, the full ${ctx.investmentAmount} is invested immediately and begins participating in the market from the contract issue date. Based on your investment horizon of at least 10 years and the risk tolerance documented in your Know-Your-Client profile, we selected a diversified portfolio of segregated funds. You retain the flexibility to switch between available funds in the contract as your circumstances change.\n\nTFSA Contribution Room - Important\nI have confirmed with you that your available TFSA contribution room is sufficient for this ${ctx.investmentAmount} deposit. Over-contributing to a TFSA results in a CRA penalty tax of 1% per month on the excess until withdrawn. I recommend you verify your current room directly through your CRA \"My Account\" portal before any future deposit, as employer-issued T4 amounts and prior-year withdrawals may take time to update.\n\n${commonDisclosure}\n\nAlternatives Considered\nWe discussed a high-interest savings account, a GIC, and a non-registered investment account. The segregated fund TFSA was recommended because it combines tax-free growth and withdrawals with capital guarantees and insurance-contract features.\n\n${commonClose}`,
+    "Non-Registered": `REASON WHY LETTER\n${ctx.company} Segregated Fund Contract - Non-Registered\n${ctx.date}\n\nDear ${greetingName},\n\nRecommendation\nBased on our recent meeting and the financial needs analysis we completed together, I am recommending that you establish a Non-Registered account under a segregated fund contract with ${ctx.company}. The contribution amount is ${ctx.investmentAmount}.\n\nYour Stated Needs & Objectives\nDuring our recent meeting, we reviewed your overall financial situation, long-term goals, and your comfort level with investment risk. Your primary objectives are to continue building investment wealth beyond registered accounts, protect those assets through an insurance-contract structure where applicable, and manage the tax impact of investment growth.\n\nHow This Recommendation Meets Your Needs\nThe ${ctx.company} Non-Registered segregated fund contract addresses these objectives in ways that traditional non-registered accounts may not. The contract provides a ${guaranteeLine} on your net deposits, subject to the terms of the Information Folder and Contract. Investment growth may include capital gains, interest, dividends, or other allocations, and tax treatment will depend on the nature of the income allocated and your personal tax situation.\n\nBased on your investment horizon and risk tolerance, we selected a diversified portfolio of segregated funds aligned with your long-term wealth-building objectives, with the flexibility to switch between available funds as your needs evolve.\n\n${commonDisclosure}\n\nAlternatives Considered\nWe discussed traditional non-registered mutual fund accounts, GICs, and direct ownership of securities. The segregated fund contract was recommended because it provides insurance-contract features in addition to the maturity and death benefit guarantees that ordinary investment accounts do not provide.\n\n${commonClose}`,
+    "Spousal RRSP": `REASON WHY LETTER\n${ctx.company} Segregated Fund Contract - Spousal RRSP\n${ctx.date}\n\nDear ${greetingName},\n\nRecommendation\nBased on our recent meeting and the financial needs analysis we completed together, I am recommending that ${ctx.householdName || ctx.clientName} establish a Spousal Registered Retirement Savings Plan (Spousal RRSP) under a segregated fund contract with ${ctx.company}. The contribution amount is ${ctx.investmentAmount}.\n\nYour Stated Needs & Objectives\nDuring our recent meeting, we reviewed your household's overall financial situation, long-term retirement goals, and risk tolerance as a couple. Your primary objectives are to build retirement savings, support future retirement income planning between spouses, protect the invested capital, and maintain an insurance-contract structure.\n\nHow This Recommendation Meets Your Needs\nA Spousal RRSP allows a household to direct retirement savings toward a spouse and may support future retirement income planning. The segregated fund contract provides a ${guaranteeLine} on net deposits, subject to the terms of the Information Folder and Contract.\n\nThree-Year Attribution Rule\nI have explained that under the Income Tax Act, if funds are withdrawn from a Spousal RRSP in the same calendar year a contribution is made or in either of the two following calendar years, the withdrawn amount, up to the amount of contributions made in that period, may be attributed back to the contributor and taxed in the contributor's hands. We have reviewed the intended contribution and withdrawal timing with this rule in mind.\n\n${commonDisclosure}\n\nAlternatives Considered\nWe discussed each spouse contributing separately to individual RRSPs and using future retirement income planning strategies. The Spousal RRSP was recommended because it can provide additional household retirement planning flexibility while adding segregated fund contract features.\n\n${commonClose}`,
+  };
+  return stripTemplatePlaceholders(templates[ctx.accountType] || "");
 };
 
 /* ============================================================
@@ -2665,12 +2645,51 @@ const SigBlock = ({ name, role }) => (
   </div>
 );
 
-const ReasonWhyPdfSection = ({ title, children }) => (
-  <div style={{ marginTop: 14 }}>
-    <div style={{ color: TEXT_COLOR, fontSize: PDF_TYPE.section, fontWeight: 700, letterSpacing: 0.05, marginBottom: 5 }}>{title}</div>
-    <div>{children}</div>
-  </div>
-);
+const REASON_WHY_TITLE_LINES = new Set([
+  "REASON WHY LETTER",
+  "Recommendation",
+  "Your Stated Needs & Objectives",
+  "How This Recommendation Meets Your Needs",
+  "TFSA Contribution Room - Important",
+  "Three-Year Attribution Rule",
+  "Disclosures",
+  "Risk Disclosures",
+  "Alternatives Considered",
+  "Important Notice",
+  "Client Acknowledgement",
+]);
+const reasonWhyBodyBlocks = (body) => {
+  const blocks = [];
+  String(body || "").split(/\n/).forEach(rawLine => {
+    const line = rawLine.trim();
+    if (!line) return;
+    if (REASON_WHY_TITLE_LINES.has(line)) {
+      blocks.push({ type: "heading", text: line });
+    } else {
+      const previous = blocks[blocks.length - 1];
+      if (previous?.type === "paragraph") previous.text += "\n" + line;
+      else blocks.push({ type: "paragraph", text: line });
+    }
+  });
+  return blocks;
+};
+const chunkReasonWhyBlocks = (blocks, maxChars = 2600) => {
+  const pages = [];
+  let page = [];
+  let count = 0;
+  blocks.forEach(block => {
+    const weight = block.text.length + (block.type === "heading" ? 90 : 40);
+    if (page.length && count + weight > maxChars) {
+      pages.push(page);
+      page = [];
+      count = 0;
+    }
+    page.push(block);
+    count += weight;
+  });
+  if (page.length) pages.push(page);
+  return pages;
+};
 
 /* --------- Advisor Disclosure (3 pages) --------- */
 const AdvisorDisclosurePdf = ({ ad }) => (
@@ -3134,45 +3153,33 @@ const EquitableQpdf = ({ q }) => (
 /* --------- Reason Why Letter  -  Segregated Funds --------- */
 const ReasonWhyPdf = ({ data }) => {
   const ctx = reasonWhyContext(data);
-  const sections = makeReasonWhy(data.segregatedFundInvestment?.reasonWhy).sections.filter(section => hasText(section.title) || hasText(section.body));
-  if (!sections.length) return null;
+  const body = makeReasonWhy(data.segregatedFundInvestment?.reasonWhy).body;
+  const blocks = reasonWhyBodyBlocks(body);
+  if (!blocks.length) return null;
+  const pages = chunkReasonWhyBlocks(blocks);
   const contractTitle = `${ctx.company} Segregated Fund Contract - ${ctx.accountLabel}`;
-  const sectionMap = sections.reduce((acc, section) => ({ ...acc, [section.title]: section.body }), {});
-  const SectionText = ({ title }) => (
-    <ReasonWhyPdfSection title={title}>
-      <PdfText>{sectionMap[title] || " "}</PdfText>
-    </ReasonWhyPdfSection>
+  const renderBlock = (block, idx) => block.type === "heading" ? (
+    <div key={idx} style={{ color: TEXT_COLOR, fontSize: 11.5, fontWeight: 700, lineHeight: 1.35, marginTop: idx === 0 ? 0 : 10, marginBottom: 4 }}>{block.text}</div>
+  ) : (
+    <div key={idx} style={{ fontSize: 11.2, lineHeight: 1.58, color: TEXT_COLOR, marginBottom: 8, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{block.text}</div>
   );
   return (
     <>
-      <PdfPage>
-        <PdfHeader title="Reason Why Letter" subtitle={contractTitle} pageLabel="Reason Why Letter" />
-        <div style={{ marginTop: 14, fontSize: PDF_TYPE.body, color: TEXT_COLOR, lineHeight: 1.62 }}>
-          <PdfText>{sectionMap.Date || ctx.date}</PdfText>
-          <PdfText>{sectionMap.Greeting || `Dear ${ctx.clientName},`}</PdfText>
-        </div>
-        <SectionText title="Recommendation"/>
-        <SectionText title="Your Stated Needs & Objectives"/>
-        <SectionText title="How This Recommendation Meets Your Needs"/>
-      </PdfPage>
-      <PdfPage>
-        <PdfHeader title="Reason Why Letter" subtitle={contractTitle} pageLabel="Reason Why Letter continued" />
-        <SectionText title="Disclosures"/>
-        <SectionText title="Risk Disclosures"/>
-        <SectionText title="Alternatives Considered"/>
-      </PdfPage>
-      <PdfPage>
-        <PdfHeader title="Reason Why Letter" subtitle={contractTitle} pageLabel="Reason Why Letter acknowledgement" />
-        <SectionText title="Important Notice"/>
-        <ReasonWhyPdfSection title="Client Acknowledgement">
-          <PdfText>{sectionMap["Client Acknowledgement"] || "I acknowledge that I have reviewed this Reason Why Letter and understand the rationale for the recommendation described above."}</PdfText>
-          <div style={{ marginTop: 14, padding: 12, background: "#FAFAF6", borderLeft: "3px solid " + GOLD }}>
-            <div style={{ fontSize: PDF_TYPE.label, color: NAVY, letterSpacing: 0.65, textTransform: "uppercase", fontWeight: 650, marginBottom: 8 }}>{ctx.clientName}</div>
-            <SigPlaceholder kind="signature" signer="signer2" label="Client Signature" width={240}/>
-            <SigPlaceholder kind="date" signer="signer2" label="Date" width={130}/>
+      {pages.map((pageBlocks, pageIdx) => (
+        <PdfPage key={pageIdx}>
+          <PdfHeader title="Reason Why Letter" subtitle={contractTitle} pageLabel={pageIdx === 0 ? "Reason Why Letter" : "Reason Why Letter continued"} />
+          <div style={{ marginTop: 12 }}>
+            {pageBlocks.map(renderBlock)}
+            {pageIdx === pages.length - 1 && (
+              <div style={{ marginTop: 14, padding: 12, background: "#FAFAF6", borderLeft: "3px solid " + GOLD }}>
+                <div style={{ fontSize: PDF_TYPE.label, color: NAVY, letterSpacing: 0.65, textTransform: "uppercase", fontWeight: 650, marginBottom: 8 }}>{ctx.clientName}</div>
+                <SigPlaceholder kind="signature" signer="signer2" label="Client Signature" width={240}/>
+                <SigPlaceholder kind="date" signer="signer2" label="Date" width={130}/>
+              </div>
+            )}
           </div>
-        </ReasonWhyPdfSection>
-      </PdfPage>
+        </PdfPage>
+      ))}
     </>
   );
 };
@@ -3506,7 +3513,7 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
       if (rw.include !== false && !rw.accountType) {
         throw new Error("Please select a Reason Why Letter account type before downloading the PDF.");
       }
-      if (rw.include !== false && rw.accountType && !rw.sections.length) {
+      if (rw.include !== false && rw.accountType && !hasText(rw.body)) {
         throw new Error("Please generate the Reason Why Letter preview before downloading the PDF.");
       }
     }
@@ -3569,8 +3576,8 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
   });
   const setReasonWhyAccountType = (accountType) => {
     const nextReasonWhy = { ...reasonWhy, accountType };
-    if (accountType && !reasonWhy.sections.length) {
-      nextReasonWhy.sections = generateReasonWhySections({
+    if (accountType && !hasText(reasonWhy.body)) {
+      nextReasonWhy.body = generateReasonWhyBody({
         ...data,
         segregatedFundInvestment: { ...sf, reasonWhy: { ...reasonWhy, accountType } },
       });
@@ -3584,23 +3591,19 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
       return;
     }
     setReasonWhy({
-      sections: generateReasonWhySections(data),
+      body: generateReasonWhyBody(data),
       generatedAccountType: reasonWhy.accountType,
     });
-  };
-  const updateReasonWhySection = (idx, key, value) => {
-    const sections = reasonWhy.sections.map((section, i) => i === idx ? { ...section, [key]: value } : section);
-    setReasonWhy({ sections });
   };
   const reasonWhyCtx = reasonWhyContext(data);
   useEffect(() => {
     if (data.businessType !== "Segregated Fund Investment") return;
-    if (!reasonWhy.accountType || reasonWhy.sections.length) return;
+    if (!reasonWhy.accountType || hasText(reasonWhy.body)) return;
     setReasonWhy({
-      sections: generateReasonWhySections(data),
+      body: generateReasonWhyBody(data),
       generatedAccountType: reasonWhy.accountType,
     });
-  }, [data.businessType, reasonWhy.accountType, reasonWhy.sections.length]);
+  }, [data.businessType, reasonWhy.accountType, reasonWhy.body]);
   const li = data.lifeInsurance.needsAnalysis;
   const isSegFund = data.businessType === "Segregated Fund Investment";
   const isLifeIns = data.businessType === "Life Insurance";
@@ -3723,18 +3726,11 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
               <button type="button" onClick={regenerateReasonWhy} className="px-3 py-2 border border-navy text-navy rounded hover:bg-navy hover:text-white text-xs font-semibold">Regenerate from template</button>
               {reasonWhy.generatedAccountType && <span className="text-xs text-gray-500">Generated from: {reasonWhyLabel(reasonWhy.generatedAccountType)}</span>}
             </div>
-            {reasonWhy.sections.length > 0 ? (
-              <div className="space-y-3 mt-3">
-                {reasonWhy.sections.map((section, idx) => (
-                  <div key={idx} className="border border-gray-200 rounded p-3 bg-gray-50">
-                    <Field label="Section title">
-                      <TextInput value={section.title} onChange={v => updateReasonWhySection(idx, "title", v)}/>
-                    </Field>
-                    <Field label="Section text">
-                      <TextArea value={section.body} onChange={v => updateReasonWhySection(idx, "body", v)} rows={idx >= 6 ? 5 : 3}/>
-                    </Field>
-                  </div>
-                ))}
+            {hasText(reasonWhy.body) ? (
+              <div className="mt-3">
+                <Field label="Editable Reason Why Letter preview">
+                  <TextArea value={reasonWhy.body} onChange={v => setReasonWhy({ body: v })} rows={24}/>
+                </Field>
               </div>
             ) : (
               <div className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-3">Select an account type to generate an editable Reason Why Letter preview.</div>
