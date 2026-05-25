@@ -33,7 +33,7 @@
     --c-line:      rgba(201, 169, 97, 0.35);
     --c-line-soft: rgba(11, 30, 63, 0.10);
 
-    --f-serif: "Cormorant Garamond", "Noto Serif SC", "Source Han Serif SC", Georgia, serif;
+    --f-serif: "Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     --f-sans:  "Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 
     --shadow-soft: 0 10px 40px rgba(11, 30, 63, 0.08);
@@ -56,12 +56,12 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  h1, h2, h3, h4 { font-family: var(--f-serif); font-weight: 600; color: var(--c-bg-deep); letter-spacing: -0.01em; }
+  h1, h2, h3, h4 { font-family: var(--f-sans); font-weight: 650; color: var(--c-bg-deep); letter-spacing: 0; }
   .en-label {
     font-family: var(--f-sans); font-size: 0.7rem; letter-spacing: 0.18em;
     text-transform: uppercase; color: var(--c-gold); font-weight: 500;
   }
-  .serif-italic { font-family: var(--f-serif); font-style: italic; font-weight: 400; }
+  .serif-italic { font-family: var(--f-sans); font-style: normal; font-weight: 400; }
 
   /* Utility re-bindings so old class names use new palette */
   .text-navy { color: var(--c-bg-deep) !important; }
@@ -182,8 +182,8 @@
     border-color: var(--c-gold); background: linear-gradient(135deg, #fff 0%, #FBF6E8 100%);
     box-shadow: 0 8px 28px rgba(201, 169, 97, 0.25);
   }
-  .choice-card .choice-en { font-family: var(--f-serif); font-style: italic; color: var(--c-gold); font-size: 0.85rem; margin-bottom: 4px; }
-  .choice-card .choice-title { font-family: var(--f-serif); font-size: 1.35rem; color: var(--c-bg-deep); font-weight: 600; line-height: 1.2; }
+  .choice-card .choice-en { font-family: var(--f-sans); font-style: normal; color: var(--c-text-soft); font-size: 0.85rem; margin-bottom: 4px; }
+  .choice-card .choice-title { font-family: var(--f-sans); font-size: 1.25rem; color: var(--c-bg-deep); font-weight: 650; line-height: 1.2; }
   .choice-card .choice-desc { font-size: 0.85rem; color: var(--c-text-soft); margin-top: 10px; line-height: 1.55; }
 
   /* Tables */
@@ -205,7 +205,7 @@
     background: radial-gradient(circle, rgba(201, 169, 97, 0.18) 0%, transparent 70%);
   }
   .hero-banner h2 { color: #fff; font-size: 1.9rem; line-height: 1.2; margin: 6px 0 12px; position: relative; z-index: 1; }
-  .hero-banner h2 .accent { color: var(--c-gold); font-style: italic; }
+  .hero-banner h2 .accent { color: var(--c-gold); font-style: normal; }
   .hero-banner p { color: rgba(245, 242, 235, 0.85); font-size: 0.92rem; max-width: 680px; position: relative; z-index: 1; }
 
   /* Footer */
@@ -250,7 +250,7 @@
   }
   .drafts-sidebar-header .en-label { color: var(--c-gold); font-size: 0.65rem; }
   .drafts-sidebar-header h3 {
-    font-family: var(--f-serif); font-size: 1.1rem; margin: 4px 0 0;
+    font-family: var(--f-sans); font-size: 1.05rem; margin: 4px 0 0;
     color: var(--c-bg-deep); line-height: 1.2; font-weight: 600;
   }
   .new-draft-btn {
@@ -274,7 +274,7 @@
   }
   .drafts-empty {
     padding: 32px 18px; text-align: center; color: var(--c-muted); font-size: 12px;
-    font-family: var(--f-serif); font-style: italic;
+    font-family: var(--f-sans); font-style: normal;
   }
   .drafts-list {
     flex: 1; overflow-y: auto; padding: 8px;
@@ -359,6 +359,8 @@ const PROVINCES = ["AB","BC","MB","NB","NL","NS","NT","NU","ON","PE","QC","SK","
 /* ============================================================
    STORAGE — multi-draft persistence
    ============================================================ */
+const AUTH_KEY = "triton_kyc_auth_v1";
+const AUTH_PASSWORD_HASH = "6e664426d7b894e69abb76ceb802638c008df651d20e79976509a0a4a6a446f4";
 const STORAGE_KEY_LEGACY = "triton_compliance_draft_v1";   // single object (kept for migration)
 const STORAGE_KEY        = "triton_compliance_drafts_v2";  // array of drafts
 
@@ -2057,7 +2059,6 @@ const TEXT_COLOR = "#1B2230";
 const TEXT_SOFT = "#4A5365";
 const PDF_FONT = "'Inter','Noto Sans SC',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";
 const PDF_FONT_CN = "'Noto Sans SC','Microsoft YaHei','PingFang SC',sans-serif";
-const PDF_SERIF = "'Cormorant Garamond','Noto Serif SC',Georgia,serif";
 const PDF_TYPE = {
   title: 18,
   subtitle: 10,
@@ -2717,62 +2718,61 @@ const LifeInsurancePdf = ({ li }) => {
   const maxLife = earned * num(li.lifeIncomeMultiple) + num(li.lifeMortgage);
   return (
     <>
-      <PdfPage orientation="landscape">
-        <PdfHeader title="Insurance Needs Analysis" pageLabel="Life Insurance Needs Analysis - Assets" />
-        <div style={{ display: "grid", gridTemplateColumns: "1.35fr 0.85fr", gap: 18, marginBottom: 12 }}>
-          <PdfSection title="Client Information">
-            <PdfField label="Client's Name" value={li.clientName} width="31%"/>
-            <PdfField label="Occupation" value={li.occupation} width="31%"/>
-            <PdfField label="Industry" value={li.industry} width="31%"/>
-            <PdfField label="Age" value={li.age} width="31%"/>
-            <PdfField label="Earned Income" value={fmtMoney(li.earnedIncome)} width="31%"/>
-            <PdfField label="Unearned Income" value={fmtMoney(li.unearnedIncome)} width="31%"/>
-            <PdfField label="Spouse Income" value={fmtMoney(li.spouseIncome)} width="31%"/>
-          </PdfSection>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8, marginTop: 16 }}>
-            <PdfSummaryBox label="Total Net Worth (CAD)" value={fmtMoney(totalNetWorth)} tone="dark"/>
-            <PdfSummaryBox label="ACB of Net Worth" value={fmtMoney(li.acbNetWorth)}/>
-          </div>
+      <PdfPage>
+        <PdfHeader title="Insurance Needs Analysis" pageLabel="Life Insurance Needs Analysis - Client & Assets" />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+          <PdfSummaryBox label="Total Net Worth (CAD)" value={fmtMoney(totalNetWorth)} tone="dark"/>
+          <PdfSummaryBox label="ACB of Net Worth" value={fmtMoney(li.acbNetWorth)}/>
         </div>
-        <PdfTwoColumn
-          left={
-            <>
-              <PdfSection title="Canadian Fixed Assets">
-                <PdfTable headers={["Asset","Market Value","Mortgage & LOC","Net Worth"]} rows={[
-                  ["Principal Residence", fmtMoney(li.fixedAssets.principalMV), fmtMoney(li.fixedAssets.principalLoan), fmtMoney(num(li.fixedAssets.principalMV)-num(li.fixedAssets.principalLoan))],
-                  ["Investment Properties", fmtMoney(li.fixedAssets.investMV), fmtMoney(li.fixedAssets.investLoan), fmtMoney(num(li.fixedAssets.investMV)-num(li.fixedAssets.investLoan))],
-                ]}/>
-              </PdfSection>
-              <PdfSection title="Business Assets">
-                <PdfTable headers={["Asset","Annual Revenue","Annual Net Income","Business FMV"]} rows={[
-                  ["Business values", fmtMoney(li.businessAssets.revenue), fmtMoney(li.businessAssets.netIncome), fmtMoney(li.businessAssets.fmv)],
-                ]}/>
-              </PdfSection>
-            </>
-          }
-          right={
-            <>
-              <PdfSection title="Canadian Liquid Assets">
-                <PdfTable headers={["Asset","Market Value","Loan","Net Worth"]} rows={[
-                  ["Registered plan (RRSP, TFSA, etc.)", fmtMoney(li.liquidAssets.regMV), fmtMoney(li.liquidAssets.regLoan), fmtMoney(num(li.liquidAssets.regMV)-num(li.liquidAssets.regLoan))],
-                  ["Non-registered investment", fmtMoney(li.liquidAssets.nonRegMV), fmtMoney(li.liquidAssets.nonRegLoan), fmtMoney(num(li.liquidAssets.nonRegMV)-num(li.liquidAssets.nonRegLoan))],
-                  ["Bank savings", fmtMoney(li.liquidAssets.bankMV), fmtMoney(li.liquidAssets.bankLoan), fmtMoney(num(li.liquidAssets.bankMV)-num(li.liquidAssets.bankLoan))],
-                  ["Other Liquid Assets", fmtMoney(li.liquidAssets.otherMV), fmtMoney(li.liquidAssets.otherLoan), fmtMoney(num(li.liquidAssets.otherMV)-num(li.liquidAssets.otherLoan))],
-                ]}/>
-              </PdfSection>
-              <PdfSection title="Foreign Assets">
-                <PdfTable headers={["Foreign Asset","FMV","Recognized Value","Net Worth"]} rows={[
-                  ["With proof (T1135, bank stmnt, etc)", fmtMoney(li.foreignAssets.withProofFMV), fmtMoney(li.foreignAssets.withProofValue), fmtMoney(li.foreignAssets.withProofValue)],
-                  ["Without proof", fmtMoney(li.foreignAssets.withoutProofFMV), fmtMoney(li.foreignAssets.withoutProofValue), fmtMoney(li.foreignAssets.withoutProofValue)],
-                ]}/>
-              </PdfSection>
-            </>
-          }
-        />
+        <PdfSection title="Client Information">
+          <PdfField label="Client's Name" value={li.clientName}/>
+          <PdfField label="Occupation" value={li.occupation}/>
+          <PdfField label="Age" value={li.age}/>
+          <PdfField label="Industry" value={li.industry}/>
+          <PdfField label="Earned Income" value={fmtMoney(li.earnedIncome)}/>
+          <PdfField label="Unearned Income" value={fmtMoney(li.unearnedIncome)}/>
+          <PdfField label="Spouse Income" value={fmtMoney(li.spouseIncome)}/>
+        </PdfSection>
+        <PdfSection title="Canadian Fixed Assets">
+          <PdfTable headers={["Asset","Market Value","Mortgage & LOC","Net Worth"]} rows={[
+            ["Principal Residence", fmtMoney(li.fixedAssets.principalMV), fmtMoney(li.fixedAssets.principalLoan), fmtMoney(num(li.fixedAssets.principalMV)-num(li.fixedAssets.principalLoan))],
+            ["Investment Properties", fmtMoney(li.fixedAssets.investMV), fmtMoney(li.fixedAssets.investLoan), fmtMoney(num(li.fixedAssets.investMV)-num(li.fixedAssets.investLoan))],
+          ]}/>
+        </PdfSection>
+        <PdfSection title="Canadian Liquid Assets">
+          <PdfTable headers={["Asset","Market Value","Loan","Net Worth"]} rows={[
+            ["Registered plan (RRSP, TFSA, etc.)", fmtMoney(li.liquidAssets.regMV), fmtMoney(li.liquidAssets.regLoan), fmtMoney(num(li.liquidAssets.regMV)-num(li.liquidAssets.regLoan))],
+            ["Non-registered investment", fmtMoney(li.liquidAssets.nonRegMV), fmtMoney(li.liquidAssets.nonRegLoan), fmtMoney(num(li.liquidAssets.nonRegMV)-num(li.liquidAssets.nonRegLoan))],
+            ["Bank savings", fmtMoney(li.liquidAssets.bankMV), fmtMoney(li.liquidAssets.bankLoan), fmtMoney(num(li.liquidAssets.bankMV)-num(li.liquidAssets.bankLoan))],
+            ["Other Liquid Assets", fmtMoney(li.liquidAssets.otherMV), fmtMoney(li.liquidAssets.otherLoan), fmtMoney(num(li.liquidAssets.otherMV)-num(li.liquidAssets.otherLoan))],
+          ]}/>
+        </PdfSection>
       </PdfPage>
-      <PdfPage orientation="landscape">
+      <PdfPage>
+        <PdfHeader title="Business & Foreign Assets" pageLabel="Life Insurance Needs Analysis - Asset Details" />
+        <PdfSection title="Business Assets">
+          <PdfTable headers={["Asset","Annual Revenue","Annual Net Income","Business FMV"]} rows={[
+            ["Business values", fmtMoney(li.businessAssets.revenue), fmtMoney(li.businessAssets.netIncome), fmtMoney(li.businessAssets.fmv)],
+          ]}/>
+        </PdfSection>
+        <PdfSection title="Foreign Assets">
+          <PdfTable headers={["Foreign Asset","FMV","Recognized Value","Net Worth"]} rows={[
+            ["With proof (T1135, bank stmnt, etc)", fmtMoney(li.foreignAssets.withProofFMV), fmtMoney(li.foreignAssets.withProofValue), fmtMoney(li.foreignAssets.withProofValue)],
+            ["Without proof", fmtMoney(li.foreignAssets.withoutProofFMV), fmtMoney(li.foreignAssets.withoutProofValue), fmtMoney(li.foreignAssets.withoutProofValue)],
+          ]}/>
+        </PdfSection>
+        <PdfSection title="Net Worth Summary">
+          <PdfField label="Canadian Fixed Assets - Net" value={fmtMoney(fixedTotalNet)}/>
+          <PdfField label="Canadian Liquid Assets - Net" value={fmtMoney(liqTotalNet)}/>
+          <PdfField label="Business FMV" value={fmtMoney(li.businessAssets.fmv)}/>
+          <PdfField label="Foreign Assets Recognized" value={fmtMoney(num(li.foreignAssets.withProofValue)+num(li.foreignAssets.withoutProofValue))}/>
+          <PdfField label="Total Net Worth (CAD)" value={fmtMoney(totalNetWorth)}/>
+          <PdfField label="ACB of Net Worth" value={fmtMoney(li.acbNetWorth)}/>
+        </PdfSection>
+      </PdfPage>
+      <PdfPage>
         <PdfHeader title="Coverage & Premium Suitability" pageLabel="Life Insurance Needs Analysis - Coverage" />
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
           <PdfSummaryBox label="Maximum CI Coverage" value={fmtMoney(maxCI)} tone="dark"/>
           <PdfSummaryBox label="Maximum Life Coverage" value={fmtMoney(maxLife)} tone="dark"/>
           <PdfSummaryBox label="New CI Coverage" value={fmtMoney(li.newCoverageCI)}/>
@@ -2790,18 +2790,16 @@ const LifeInsurancePdf = ({ li }) => {
             ["New Coverage to be Placed", "", fmtMoney(li.newCoverageCI), fmtMoney(li.newCoverageLife)],
           ]}/>
         </PdfSection>
-        <div style={{ display: "grid", gridTemplateColumns: "0.8fr 1.2fr", gap: 18, marginTop: 6 }}>
-          <PdfSection title="Premium Suitability">
-            <PdfSummaryBox label="Annual Premium" value={fmtMoney(li.annualPremium)}/>
-          </PdfSection>
-          <PdfSection title="Signatures">
-            <PdfText size={9}>I/We confirm that the information presented in this Insurance Needs Analysis has been reviewed with my/our advisor and is accurate to the best of my/our knowledge.</PdfText>
-            <div style={{ marginTop: 8 }}>
-              <SigBlock signer="signer2" name={li.policyOwnerName || li.clientName} role="Policy Owner"/>
-              <SigBlock signer="signer1" name={li.advisorName || "Jie Yuan"} role="Advisor"/>
-            </div>
-          </PdfSection>
-        </div>
+        <PdfSection title="Premium Suitability">
+          <PdfSummaryBox label="Annual Premium" value={fmtMoney(li.annualPremium)}/>
+        </PdfSection>
+        <PdfSection title="Signatures">
+          <PdfText>I/We confirm that the information presented in this Insurance Needs Analysis has been reviewed with my/our advisor and is accurate to the best of my/our knowledge.</PdfText>
+          <div style={{ marginTop: 8 }}>
+            <SigBlock signer="signer2" name={li.policyOwnerName || li.clientName} role="Policy Owner"/>
+            <SigBlock signer="signer1" name={li.advisorName || "Jie Yuan"} role="Advisor"/>
+          </div>
+        </PdfSection>
       </PdfPage>
     </>
   );
@@ -3076,9 +3074,6 @@ const ReviewAndGeneratePDF = ({ data, goToStep }) => {
     const pdf = await buildPdf();
     return pdf.output("blob");
   };
-
-  const printPage = () => window.print();
-
   const ad = data.advisorDisclosure;
   const sf = data.segregatedFundInvestment;
   const li = data.lifeInsurance.needsAnalysis;
@@ -3095,7 +3090,6 @@ const ReviewAndGeneratePDF = ({ data, goToStep }) => {
         <h2 className="text-2xl font-bold text-navy">Review &amp; Generate PDF</h2>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => goToStep("advisorDisclosure")} className="px-4 py-2 border border-navy text-navy rounded hover:bg-navy hover:text-white text-sm">Edit from start</button>
-          <button onClick={printPage} className="px-4 py-2 border border-navy text-navy rounded hover:bg-navy hover:text-white text-sm">Print</button>
           <button onClick={downloadPdf} disabled={generating} className="px-5 py-2 bg-gold text-navy font-semibold rounded hover:bg-yellow-500 text-sm disabled:opacity-50">
             {generating ? "Generating..." : "Download PDF"}
           </button>
@@ -3269,6 +3263,70 @@ const EquitableReview = ({ d }) => (
 /* ============================================================
    MAIN APP
    ============================================================ */
+
+/* ============================================================
+   LIGHTWEIGHT LOGIN GATE
+   Keeps casual visitors away from client drafts without touching draft storage.
+   ============================================================ */
+const hashText = async (value) => {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, "0")).join("");
+};
+
+const isPortalUnlocked = () => (
+  sessionStorage.getItem(AUTH_KEY) === "ok" || localStorage.getItem(AUTH_KEY) === "ok"
+);
+
+const LoginScreen = ({ onLogin }) => {
+  const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(false);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const hashed = await hashText(password);
+      if (hashed !== AUTH_PASSWORD_HASH) {
+        setError("Password is incorrect · 密码不正确");
+        return;
+      }
+      const storage = remember ? localStorage : sessionStorage;
+      storage.setItem(AUTH_KEY, "ok");
+      onLogin();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center px-4" style={{ background: "var(--c-bg-deep)" }}>
+      <div className="w-full max-w-md bg-white border border-gray-200 rounded-lg p-8" style={{ boxShadow: "0 28px 70px rgba(0,0,0,0.22)" }}>
+        <img src={window.TRITON_LOGO || "./triton-logo.png"} alt="Triton Wealth Management" style={{ height: 58, width: "auto", marginBottom: 22 }}/>
+        <div className="en-label" style={{ color: "var(--c-bg-deep)", letterSpacing: "0.12em" }}>Secure Portal</div>
+        <h1 className="text-2xl font-bold text-navy mt-2 mb-2">Triton KYC Login</h1>
+        <p className="text-sm text-gray-600 mb-6">Please sign in before viewing or editing client compliance drafts.</p>
+        <form onSubmit={submit} className="space-y-4">
+          <Field label="Password" required>
+            <TextInput type="password" value={password} onChange={setPassword} placeholder="Enter portal password"/>
+          </Field>
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} style={{ width: 16 }}/>
+            Keep me signed in on this device
+          </label>
+          {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm">{error}</div>}
+          <button type="submit" disabled={busy || !password} className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed">
+            {busy ? "Checking..." : "Login"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
 /* ============================================================
    DRAFTS SIDEBAR  -  left-rail listing all in-progress drafts
    ============================================================ */
@@ -3350,6 +3408,7 @@ const App = () => {
   });
   const [saveMsg, setSaveMsg] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [portalUnlocked, setPortalUnlocked] = useState(() => isPortalUnlocked());
 
   /* Ensure activeDraftId always points at a real draft */
   useEffect(() => {
@@ -3489,6 +3548,16 @@ const App = () => {
     return true;
   };
 
+  const handleLogout = () => {
+    sessionStorage.removeItem(AUTH_KEY);
+    localStorage.removeItem(AUTH_KEY);
+    setPortalUnlocked(false);
+  };
+
+  if (!portalUnlocked) {
+    return <LoginScreen onLogin={() => setPortalUnlocked(true)}/>;
+  }
+
   const showHero = currentStepIdx === 0;
 
   return (
@@ -3500,7 +3569,7 @@ const App = () => {
             <img src={window.TRITON_LOGO_COVER || window.TRITON_LOGO || "./Triton Logo 2.png"} alt="Triton Wealth Management 富瑞财富" className="logo-mark"/>
             <div className="hidden md:block border-l border-white/15 pl-4">
               <div className="en-label" style={{ color: "var(--c-gold)" }}>Triton Wealth Management · 富瑞财富</div>
-              <div className="text-white" style={{ fontFamily: "var(--f-serif)", fontSize: "1.05rem", fontStyle: "italic", letterSpacing: "0.02em" }}>
+              <div className="text-white" style={{ fontFamily: "var(--f-sans)", fontSize: "1.02rem", fontStyle: "normal", letterSpacing: "0" }}>
                 Compliance Form Portal
               </div>
             </div>
@@ -3511,6 +3580,7 @@ const App = () => {
               className="px-4 py-2 text-xs uppercase tracking-widest font-medium border border-[#C9A961] text-[#C9A961] rounded hover:bg-[#C9A961] hover:text-[#0B1E3F] transition">
               Save Draft
             </button>
+            <button onClick={handleLogout} className="px-4 py-2 text-xs uppercase tracking-widest font-medium border border-white/35 text-white rounded hover:bg-white hover:text-[#0B1E3F] transition">Logout</button>
             <button onClick={handleResetAll} className="btn-danger uppercase tracking-widest">Reset</button>
           </div>
         </div>
