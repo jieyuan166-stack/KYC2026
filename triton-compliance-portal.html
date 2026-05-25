@@ -14,6 +14,8 @@
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://unpkg.com/mammoth@1.8.0/mammoth.browser.min.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
 <!-- Inlines TRITON_LOGO as a base64 data URL so it always renders in PDF (no CORS / 404 issues) -->
 <script src="./triton-logo-data.js"></script>
@@ -537,6 +539,14 @@ const makeDebtRow = (row = {}) => ({
   monthly: row.monthly || "",
 });
 const normalizeReasonWhyAccountType = (value) => value === "TFSA Lump Sum" ? "TFSA" : (value || "");
+const makeReasonWhyAttachment = (attachment = {}) => ({
+  fileName: attachment.fileName || "",
+  fileType: attachment.fileType || "",
+  kind: attachment.kind || "",
+  dataUrl: attachment.dataUrl || "",
+  text: attachment.text || "",
+  uploadedAt: attachment.uploadedAt || "",
+});
 const makeReasonWhy = (row = {}) => {
   const legacySections = Array.isArray(row.sections)
     ? row.sections
@@ -549,6 +559,8 @@ const makeReasonWhy = (row = {}) => {
     accountType: normalizeReasonWhyAccountType(row.accountType),
     generatedAccountType: normalizeReasonWhyAccountType(row.generatedAccountType),
     body: row.body || legacySections || "",
+    sourceSnapshot: row.sourceSnapshot || null,
+    attachment: makeReasonWhyAttachment(row.attachment),
   };
 };
 
@@ -733,6 +745,8 @@ const initialFormData = {
       accountType: "",
       generatedAccountType: "",
       body: "",
+      sourceSnapshot: null,
+      attachment: makeReasonWhyAttachment(),
     },
     insuranceQuestionnaire: {
       manulife: {
@@ -2280,7 +2294,7 @@ const ReviewSummaryRow = ({ label, value }) => (
 
 const ReviewSignaturePlaceholder = ({ label }) => (
   <div className="mt-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
-    {label}: highlighted in PDF for Adobe Sign
+    {label}: highlighted in PDF for signing
   </div>
 );
 
@@ -2450,6 +2464,35 @@ const PdfHeader = ({ title, subtitle, pageLabel }) => (
   </div>
 );
 
+const TritonLetterheadHeader = ({ title, subtitle, pageLabel }) => (
+  <div style={{ marginBottom: 18 }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", paddingBottom: 12, borderBottom: "1px solid " + CREAM_DEEP }}>
+      <img
+        src={(typeof window !== "undefined" && window.TRITON_LOGO_STACK) || (typeof window !== "undefined" && window.TRITON_LOGO) || "./LOGO PNG 竖版.png"}
+        alt="Triton Wealth Management"
+        style={{ height: 68, width: "auto" }}
+      />
+      <div style={{ textAlign: "right", fontSize: PDF_TYPE.small, color: TEXT_SOFT, lineHeight: 1.45, fontFamily: PDF_FONT, paddingTop: 4 }}>
+        <div style={{ fontWeight: 700, color: NAVY, fontSize: 12.5 }}>Triton Wealth Management Corp.</div>
+        <div>#1200 1200 W 73rd Ave</div>
+        <div>Vancouver, BC V6P 6G5</div>
+        <div>Phone: (778) 837-6688</div>
+      </div>
+    </div>
+    {pageLabel && (
+      <div style={{ fontSize: PDF_TYPE.small, color: TEXT_SOFT, letterSpacing: 1.2, textTransform: "uppercase", fontWeight: 650, marginTop: 9, textAlign: "right", fontFamily: PDF_FONT }}>
+        {pageLabel}
+      </div>
+    )}
+    <h2 style={{ color: TEXT_COLOR, fontFamily: PDF_FONT, fontSize: 16, fontWeight: 700, margin: "8px 0 0", lineHeight: 1.2, textAlign: "left" }}>{title}</h2>
+    {subtitle && (
+      <div style={{ fontSize: 10.5, color: TEXT_SOFT, marginTop: 3, fontFamily: PDF_FONT, textAlign: "left", fontWeight: 500 }}>
+        {subtitle}
+      </div>
+    )}
+  </div>
+);
+
 const PdfSection = ({ title, children }) => (
   <div style={{ marginTop: 16 }}>
     <div style={{ background: NAVY, color: "#fff", padding: "7px 12px", fontSize: PDF_TYPE.section, fontWeight: 650, letterSpacing: 0.15, borderLeft: "3px solid " + GOLD }}>{title}</div>
@@ -2558,6 +2601,11 @@ const guaranteeSentence = (guarantee) => {
   if (parsed) return `The contract provides a ${parsed.maturity}% Maturity Guarantee and a ${parsed.death}% Death Benefit Guarantee on your net deposits, subject to the terms of the Information Folder and Contract.`;
   return "The contract provides contractual maturity and death benefit guarantees, subject to the terms of the Information Folder and Contract.";
 };
+const reasonWhyGuaranteeWording = (guarantee) => {
+  const parsed = parseGuarantee(guarantee);
+  if (parsed) return `${parsed.maturity}% Maturity Guarantee and ${parsed.death}% Death Benefit Guarantee`;
+  return "contractual maturity and death benefit guarantees";
+};
 const reasonWhyContext = (data) => {
   const sf = data.segregatedFundInvestment || {};
   const ad = data.advisorDisclosure || {};
@@ -2576,11 +2624,36 @@ const reasonWhyContext = (data) => {
     householdName: [clientName, client2Name].filter(Boolean).join(" and "),
     investmentAmount: fmtMoney(amountRaw) || "the contribution amount discussed",
     guaranteeText: guaranteeSentence(nl.guarantee),
+    guaranteeWording: reasonWhyGuaranteeWording(nl.guarantee),
     maturityGuarantee: parseGuarantee(nl.guarantee)?.maturity || "contractual",
     deathBenefitGuarantee: parseGuarantee(nl.guarantee)?.death || "contractual",
     riskProfile: nl.riskProfile || lc.investmentObjectives || "the risk tolerance documented in your Know-Your-Client profile",
     timeHorizon: nl.timeHorizon || lc.timeHorizon || "your documented investment time horizon",
   };
+};
+const reasonWhySourceSnapshot = (data) => {
+  const ctx = reasonWhyContext(data);
+  return {
+    accountType: ctx.accountType,
+    company: ctx.company,
+    clientName: ctx.clientName,
+    investmentAmount: ctx.investmentAmount,
+    date: ctx.date,
+    guaranteeWording: ctx.guaranteeWording,
+  };
+};
+const sameReasonWhySnapshot = (a, b) => JSON.stringify(a || null) === JSON.stringify(b || null);
+const applyReasonWhyTokens = (text, data) => {
+  const ctx = reasonWhyContext(data);
+  const replacements = {
+    COMPANY: ctx.company,
+    DATE: ctx.date,
+    CLIENT_NAME: ctx.clientName,
+    INVESTMENT_AMOUNT: ctx.investmentAmount,
+    MATURITY_GUARANTEE: ctx.maturityGuarantee === "contractual" ? "contractual maturity guarantee" : `${ctx.maturityGuarantee}% Maturity Guarantee`,
+    DEATH_BENEFIT_GUARANTEE: ctx.deathBenefitGuarantee === "contractual" ? "contractual death benefit guarantee" : `${ctx.deathBenefitGuarantee}% Death Benefit Guarantee`,
+  };
+  return String(text || "").replace(/\{\{\s*([A-Z0-9_]+)\s*\}\}/g, (_, key) => replacements[key] || "");
 };
 const stripTemplatePlaceholders = (text) => String(text || "")
   .replace(/\{\{[^}]+\}\}/g, "")
@@ -3156,7 +3229,7 @@ const ReasonWhyPdf = ({ data }) => {
   const body = makeReasonWhy(data.segregatedFundInvestment?.reasonWhy).body;
   const blocks = reasonWhyBodyBlocks(body);
   if (!blocks.length) return null;
-  const pages = chunkReasonWhyBlocks(blocks);
+  const pages = chunkReasonWhyBlocks(blocks, 2250);
   const contractTitle = `${ctx.company} Segregated Fund Contract - ${ctx.accountLabel}`;
   const renderBlock = (block, idx) => block.type === "heading" ? (
     <div key={idx} style={{ color: TEXT_COLOR, fontSize: 11.5, fontWeight: 700, lineHeight: 1.35, marginTop: idx === 0 ? 0 : 10, marginBottom: 4 }}>{block.text}</div>
@@ -3167,7 +3240,40 @@ const ReasonWhyPdf = ({ data }) => {
     <>
       {pages.map((pageBlocks, pageIdx) => (
         <PdfPage key={pageIdx}>
-          <PdfHeader title="Reason Why Letter" subtitle={contractTitle} pageLabel={pageIdx === 0 ? "Reason Why Letter" : "Reason Why Letter continued"} />
+          <TritonLetterheadHeader title="Reason Why Letter" subtitle={contractTitle} pageLabel={pageIdx === 0 ? "Reason Why Letter" : "Reason Why Letter continued"} />
+          <div style={{ marginTop: 12 }}>
+            {pageBlocks.map(renderBlock)}
+            {pageIdx === pages.length - 1 && (
+              <div style={{ marginTop: 14, padding: 12, background: "#FAFAF6", borderLeft: "3px solid " + GOLD }}>
+                <div style={{ fontSize: PDF_TYPE.label, color: NAVY, letterSpacing: 0.65, textTransform: "uppercase", fontWeight: 650, marginBottom: 8 }}>{ctx.clientName}</div>
+                <SigPlaceholder kind="signature" signer="signer2" label="Client Signature" width={240}/>
+                <SigPlaceholder kind="date" signer="signer2" label="Date" width={130}/>
+              </div>
+            )}
+          </div>
+        </PdfPage>
+      ))}
+    </>
+  );
+};
+
+const ReasonWhyAttachmentTextPdf = ({ data }) => {
+  const rw = makeReasonWhy(data.segregatedFundInvestment?.reasonWhy);
+  const attachment = rw.attachment;
+  if (attachment.kind !== "docx" || !hasText(attachment.text)) return null;
+  const ctx = reasonWhyContext(data);
+  const blocks = reasonWhyBodyBlocks(attachment.text);
+  const pages = chunkReasonWhyBlocks(blocks, 2250);
+  const renderBlock = (block, idx) => block.type === "heading" ? (
+    <div key={idx} style={{ color: TEXT_COLOR, fontSize: 11.5, fontWeight: 700, lineHeight: 1.35, marginTop: idx === 0 ? 0 : 10, marginBottom: 4 }}>{block.text}</div>
+  ) : (
+    <div key={idx} style={{ fontSize: 11.2, lineHeight: 1.58, color: TEXT_COLOR, marginBottom: 8, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{block.text}</div>
+  );
+  return (
+    <>
+      {pages.map((pageBlocks, pageIdx) => (
+        <PdfPage key={`attachment-${pageIdx}`}>
+          <TritonLetterheadHeader title="Reason Why Attachment" subtitle={attachment.fileName} pageLabel={pageIdx === 0 ? "Reason Why attachment" : "Reason Why attachment continued"} />
           <div style={{ marginTop: 12 }}>
             {pageBlocks.map(renderBlock)}
             {pageIdx === pages.length - 1 && (
@@ -3305,6 +3411,7 @@ const PrintableDocument = ({ data }) => {
       {isSegFund && ic === "Canada Life"   && <CanadaLifeQpdf  q={sf.insuranceQuestionnaire.canadaLife}/>}
       {isSegFund && ic === "Equitable Life"&& <EquitableQpdf   q={sf.insuranceQuestionnaire.equitableLife}/>}
       {isSegFund && sf.reasonWhy?.include !== false && sf.reasonWhy?.accountType && <ReasonWhyPdf data={data}/>}
+      {isSegFund && sf.reasonWhy?.include !== false && <ReasonWhyAttachmentTextPdf data={data}/>}
       {isLifeIns && <LifeInsurancePdf li={data.lifeInsurance.needsAnalysis}/>}
     </div>
   );
@@ -3498,6 +3605,46 @@ const blobToBase64 = (blob) => new Promise((resolve, reject) => {
   reader.onerror = reject;
   reader.readAsDataURL(blob);
 });
+const fileToDataUrl = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(reader.result);
+  reader.onerror = reject;
+  reader.readAsDataURL(file);
+});
+const fileToArrayBuffer = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(reader.result);
+  reader.onerror = reject;
+  reader.readAsArrayBuffer(file);
+});
+const dataUrlToUint8Array = (dataUrl) => {
+  const base64 = String(dataUrl || "").split(",")[1] || "";
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+};
+const mergePdfAttachment = async (jsPdf, attachment) => {
+  if (attachment?.kind !== "pdf" || !attachment.dataUrl) return jsPdf.output("blob");
+  if (!window.PDFLib?.PDFDocument) throw new Error("PDF attachment support failed to load. Please refresh and try again.");
+  const { PDFDocument } = window.PDFLib;
+  const mainDoc = await PDFDocument.load(jsPdf.output("arraybuffer"));
+  const attachmentDoc = await PDFDocument.load(dataUrlToUint8Array(attachment.dataUrl));
+  const attachmentPages = await mainDoc.copyPages(attachmentDoc, attachmentDoc.getPageIndices());
+  attachmentPages.forEach(page => mainDoc.addPage(page));
+  const mergedBytes = await mainDoc.save();
+  return new Blob([mergedBytes], { type: "application/pdf" });
+};
+const saveBlobAs = (blob, filename) => {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
 
 /* ============================================================
    REVIEW & GENERATE PDF
@@ -3505,6 +3652,8 @@ const blobToBase64 = (blob) => new Promise((resolve, reject) => {
 const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
   const printableRef = useRef(null);
   const [generating, setGenerating] = useState(false);
+  const [attachmentBusy, setAttachmentBusy] = useState(false);
+  const [attachmentError, setAttachmentError] = useState("");
 
   // Builds a multi-page PDF by rasterising each .pdf-page element separately.
   const buildPdf = async () => {
@@ -3551,11 +3700,13 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
     setGenerating(true);
     try {
       const pdf = await buildPdf();
+      const reasonWhyForExport = makeReasonWhy(data.segregatedFundInvestment?.reasonWhy);
+      const finalBlob = await mergePdfAttachment(pdf, reasonWhyForExport.attachment);
       const clientName = data.advisorDisclosure.client1Name || data.advisorDisclosure.clientName || "client";
       const safeName = clientName.replace(/[^a-z0-9]/gi, "_");
       const dateStr = new Date().toISOString().split("T")[0];
       const businessSlug = data.businessType === "Life Insurance" ? "Life_Insurance" : "Seg_Fund";
-      pdf.save(`Triton_${businessSlug}_${safeName}_${dateStr}.pdf`);
+      saveBlobAs(finalBlob, `Triton_${businessSlug}_${safeName}_${dateStr}.pdf`);
     } catch (err) {
       alert("PDF generation failed: " + err.message);
     } finally {
@@ -3565,7 +3716,8 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
 
   const getPdfBlob = async () => {
     const pdf = await buildPdf();
-    return pdf.output("blob");
+    const reasonWhyForExport = makeReasonWhy(data.segregatedFundInvestment?.reasonWhy);
+    return mergePdfAttachment(pdf, reasonWhyForExport.attachment);
   };
   const ad = data.advisorDisclosure;
   const sf = data.segregatedFundInvestment;
@@ -3577,11 +3729,13 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
   const setReasonWhyAccountType = (accountType) => {
     const nextReasonWhy = { ...reasonWhy, accountType };
     if (accountType && !hasText(reasonWhy.body)) {
-      nextReasonWhy.body = generateReasonWhyBody({
+      const nextData = {
         ...data,
         segregatedFundInvestment: { ...sf, reasonWhy: { ...reasonWhy, accountType } },
-      });
+      };
+      nextReasonWhy.body = generateReasonWhyBody(nextData);
       nextReasonWhy.generatedAccountType = accountType;
+      nextReasonWhy.sourceSnapshot = reasonWhySourceSnapshot(nextData);
     }
     setReasonWhy(nextReasonWhy);
   };
@@ -3593,15 +3747,50 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
     setReasonWhy({
       body: generateReasonWhyBody(data),
       generatedAccountType: reasonWhy.accountType,
+      sourceSnapshot: reasonWhySourceSnapshot(data),
     });
   };
   const reasonWhyCtx = reasonWhyContext(data);
+  const currentReasonWhySnapshot = reasonWhySourceSnapshot(data);
+  const reasonWhySourceChanged = hasText(reasonWhy.body) && reasonWhy.accountType && !sameReasonWhySnapshot(reasonWhy.sourceSnapshot, currentReasonWhySnapshot);
+  const handleReasonWhyAttachment = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setAttachmentBusy(true);
+    setAttachmentError("");
+    try {
+      const lowerName = file.name.toLowerCase();
+      if (file.type === "application/pdf" || lowerName.endsWith(".pdf")) {
+        const dataUrl = await fileToDataUrl(file);
+        setReasonWhy({ attachment: makeReasonWhyAttachment({ fileName: file.name, fileType: file.type || "application/pdf", kind: "pdf", dataUrl, uploadedAt: new Date().toISOString() }) });
+      } else if (lowerName.endsWith(".docx")) {
+        if (!window.mammoth?.extractRawText) throw new Error("Word attachment support failed to load. Please refresh and try again.");
+        const arrayBuffer = await fileToArrayBuffer(file);
+        const result = await window.mammoth.extractRawText({ arrayBuffer });
+        const text = applyReasonWhyTokens(result.value || "", data).trim();
+        if (!hasText(text)) throw new Error("No readable text was found in this Word document.");
+        setReasonWhy({ attachment: makeReasonWhyAttachment({ fileName: file.name, fileType: file.type || "application/vnd.openxmlformats-officedocument.wordprocessingml.document", kind: "docx", text, uploadedAt: new Date().toISOString() }) });
+      } else {
+        throw new Error("Please attach a PDF or Word .docx Reason Why file.");
+      }
+    } catch (err) {
+      setAttachmentError(err.message || "Attachment could not be processed.");
+    } finally {
+      setAttachmentBusy(false);
+      event.target.value = "";
+    }
+  };
+  const removeReasonWhyAttachment = () => {
+    setAttachmentError("");
+    setReasonWhy({ attachment: makeReasonWhyAttachment() });
+  };
   useEffect(() => {
     if (data.businessType !== "Segregated Fund Investment") return;
     if (!reasonWhy.accountType || hasText(reasonWhy.body)) return;
     setReasonWhy({
       body: generateReasonWhyBody(data),
       generatedAccountType: reasonWhy.accountType,
+      sourceSnapshot: reasonWhySourceSnapshot(data),
     });
   }, [data.businessType, reasonWhy.accountType, reasonWhy.body]);
   const li = data.lifeInsurance.needsAnalysis;
@@ -3722,8 +3911,15 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
             <ReviewSummaryRow label="Company" value={reasonWhyCtx.company}/>
             <ReviewSummaryRow label="Client name" value={reasonWhyCtx.clientName}/>
             <ReviewSummaryRow label="Investment amount" value={reasonWhyCtx.investmentAmount}/>
+            <ReviewSummaryRow label="Date" value={reasonWhyCtx.date}/>
+            <ReviewSummaryRow label="Guarantee wording" value={reasonWhyCtx.guaranteeWording}/>
+            {reasonWhySourceChanged && (
+              <div className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                Source information changed since this Reason Why Letter was generated. Regenerate from current KYC data to update the client name, company, amount, date, and guarantee wording.
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-2 mt-3 mb-2">
-              <button type="button" onClick={regenerateReasonWhy} className="px-3 py-2 border border-navy text-navy rounded hover:bg-navy hover:text-white text-xs font-semibold">Regenerate from template</button>
+              <button type="button" onClick={regenerateReasonWhy} className="px-3 py-2 border border-navy text-navy rounded hover:bg-navy hover:text-white text-xs font-semibold">Regenerate from current KYC data</button>
               {reasonWhy.generatedAccountType && <span className="text-xs text-gray-500">Generated from: {reasonWhyLabel(reasonWhy.generatedAccountType)}</span>}
             </div>
             {hasText(reasonWhy.body) ? (
@@ -3735,6 +3931,20 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
             ) : (
               <div className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-3">Select an account type to generate an editable Reason Why Letter preview.</div>
             )}
+            <div className="mt-4 rounded border border-gray-200 bg-gray-50 p-3">
+              <div className="text-xs font-semibold text-navy mb-2">Attach Reason Why Word/PDF</div>
+              <input type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={handleReasonWhyAttachment} className="text-xs"/>
+              <div className="text-[11px] text-gray-600 mt-2">PDF attachments are appended as original pages. Word attachments are converted to Triton letterhead pages.</div>
+              {attachmentBusy && <div className="text-xs text-gray-600 mt-2">Processing attachment...</div>}
+              {attachmentError && <div className="text-xs text-red-700 mt-2">{attachmentError}</div>}
+              {reasonWhy.attachment?.fileName && (
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="font-semibold text-navy">{reasonWhy.attachment.fileName}</span>
+                  <span className="text-gray-500">{reasonWhy.attachment.kind === "pdf" ? "PDF attachment" : "Word text attachment"}</span>
+                  <button type="button" onClick={removeReasonWhyAttachment} className="px-2 py-1 border border-red-300 text-red-700 rounded hover:bg-red-50">Remove</button>
+                </div>
+              )}
+            </div>
             <div className="mt-2 text-xs text-gray-600">PDF will include client signature and date boxes only. Advisor signature is not included on this letter.</div>
           </ReviewPanel>
         )}
