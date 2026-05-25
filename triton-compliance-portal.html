@@ -418,6 +418,18 @@ const deepClone = (o) => JSON.parse(JSON.stringify(o));
 const makeRowId = () => "r_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
 const ensureRows = (rows, factory) => Array.isArray(rows) && rows.length ? rows : [factory()];
 const getPath = (obj, path) => path.split(".").reduce((acc, key) => acc?.[key], obj);
+const setPathMutable = (obj, path, value) => {
+  const keys = path.split(".");
+  let cur = obj;
+  keys.forEach((key, idx) => {
+    if (idx === keys.length - 1) {
+      cur[key] = value;
+      return;
+    }
+    cur[key] = cur[key] || {};
+    cur = cur[key];
+  });
+};
 const setPathImmutable = (obj, path, value) => {
   const keys = path.split(".");
   const clone = Array.isArray(obj) ? [...obj] : { ...obj };
@@ -441,6 +453,30 @@ const splitFullName = (name) => {
 const fullClientName = (ad = {}) => (ad.client1Name || ad.clientName || "").trim();
 const fullHouseholdName = (ad = {}) => [fullClientName(ad), ad.client2Name].filter(Boolean).join(" / ");
 const hasText = (v) => String(v || "").trim().length > 0;
+const DEFAULT_TODAY_DATE_PATHS = [
+  "advisorDisclosure.client1Date",
+  "advisorDisclosure.client2Date",
+  "segregatedFundInvestment.leverageCompliance.clientDateAck",
+  "segregatedFundInvestment.leverageCompliance.jointDateAck",
+  "segregatedFundInvestment.leverageCompliance.advisorDateAck",
+  "segregatedFundInvestment.nonLeverageCompliance.clientDate",
+  "segregatedFundInvestment.nonLeverageCompliance.advisorDate",
+  "segregatedFundInvestment.insuranceQuestionnaire.manulife.dateCompleted",
+  "segregatedFundInvestment.insuranceQuestionnaire.manulife.clientDate",
+  "segregatedFundInvestment.insuranceQuestionnaire.manulife.advisorDate",
+  "segregatedFundInvestment.insuranceQuestionnaire.iaFinancial.signedDate",
+  "segregatedFundInvestment.insuranceQuestionnaire.canadaLife.date",
+  "segregatedFundInvestment.insuranceQuestionnaire.equitableLife.clientDate",
+  "segregatedFundInvestment.insuranceQuestionnaire.equitableLife.advisorDate",
+  "lifeInsurance.needsAnalysis.policyOwnerDate",
+  "lifeInsurance.needsAnalysis.advisorDate",
+];
+const applyDefaultTodayDates = (formData) => {
+  const today = todayISO();
+  DEFAULT_TODAY_DATE_PATHS.forEach(path => {
+    if (!hasText(getPath(formData, path))) setPathMutable(formData, path, today);
+  });
+};
 const getSmartNameTargets = (formData, primaryName, spouseName) => {
   const primary = splitFullName(primaryName);
   const spouse = splitFullName(spouseName);
@@ -499,10 +535,7 @@ function normalizeFormData(formData) {
   fd.smartFill = fd.smartFill || { manual: {}, lastPrimaryName: "", lastSpouseName: "" };
   fd.smartFill.manual = fd.smartFill.manual || {};
   fd.advisorDisclosure = fd.advisorDisclosure || {};
-  if (!hasText(fd.advisorDisclosure.client1Date)) fd.advisorDisclosure.client1Date = todayISO();
-  if ((fd.advisorDisclosure.spouseConsent || hasText(fd.advisorDisclosure.client2Name)) && !hasText(fd.advisorDisclosure.client2Date)) {
-    fd.advisorDisclosure.client2Date = todayISO();
-  }
+  applyDefaultTodayDates(fd);
 
   const lc = fd.segregatedFundInvestment?.leverageCompliance;
   if (lc) {
