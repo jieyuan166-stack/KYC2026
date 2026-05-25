@@ -2364,7 +2364,7 @@ const PdfPage = ({ children, cover, padded = true, orientation = "portrait" }) =
 
 const ReasonWhyPage = ({ children }) => (
   <PdfPage padded={false}>
-    <div style={{ padding: "44px 72px 60px 72px", minHeight: PDF_PAGE_H, boxSizing: "border-box" }}>
+    <div style={{ padding: "44px 80px 60px 80px", minHeight: PDF_PAGE_H, boxSizing: "border-box" }}>
       {children}
     </div>
   </PdfPage>
@@ -2496,7 +2496,7 @@ const PdfHeader = ({ title, subtitle, pageLabel }) => (
   </div>
 );
 
-const TritonLetterheadHeader = ({ title, subtitle, pageLabel, compact = false }) => (
+const TritonLetterheadHeader = ({ title, subtitle, pageLabel, compact = false, centerTitle = false }) => (
   <div style={{ marginBottom: compact ? 12 : 18 }}>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", paddingBottom: compact ? 9 : 12, borderBottom: "1px solid " + (compact ? "rgba(235,228,211,0.72)" : CREAM_DEEP) }}>
       <img
@@ -2528,9 +2528,11 @@ const TritonLetterheadHeader = ({ title, subtitle, pageLabel, compact = false })
         {pageLabel}
       </div>
     )}
-    <h2 style={{ color: TEXT_COLOR, fontFamily: PDF_FONT, fontSize: 16, fontWeight: 700, margin: "8px 0 0", lineHeight: 1.2, textAlign: "left" }}>{title}</h2>
+    {title && (
+      <h2 style={{ color: TEXT_COLOR, fontFamily: PDF_FONT, fontSize: 16, fontWeight: 700, margin: "8px 0 0", lineHeight: 1.2, textAlign: centerTitle ? "center" : "left" }}>{title}</h2>
+    )}
     {subtitle && (
-      <div style={{ fontSize: 10.5, color: TEXT_SOFT, marginTop: 3, fontFamily: PDF_FONT, textAlign: "left", fontWeight: 500 }}>
+      <div style={{ fontSize: 10.5, color: TEXT_SOFT, marginTop: 3, fontFamily: PDF_FONT, textAlign: centerTitle ? "center" : "left", fontWeight: 500 }}>
         {subtitle}
       </div>
     )}
@@ -3307,8 +3309,7 @@ const ReasonWhyPdf = ({ data }) => {
   const body = makeReasonWhy(data.segregatedFundInvestment?.reasonWhy).body;
   const blocks = stripReasonWhyLeadingTitles(reasonWhyBodyBlocks(body), ctx);
   if (!blocks.length) return null;
-  const pages = chunkReasonWhyBlocks(blocks, 2750);
-  const contractTitle = `${ctx.company} Segregated Fund Contract - ${ctx.accountLabel}`;
+  const pages = chunkReasonWhyBlocks(blocks, 2950);
   const renderBlock = (block, idx) => block.type === "heading" ? (
     <div key={idx} style={{ color: TEXT_COLOR, fontSize: 11.4, fontWeight: 700, lineHeight: 1.42, marginTop: idx === 0 ? 0 : 12, marginBottom: 7 }}>{block.text}</div>
   ) : (
@@ -3318,7 +3319,7 @@ const ReasonWhyPdf = ({ data }) => {
     <>
       {pages.map((pageBlocks, pageIdx) => (
         <ReasonWhyPage key={pageIdx}>
-          <TritonLetterheadHeader title="Reason Why Letter" subtitle={contractTitle} />
+          <TritonLetterheadHeader title="Reason Why Letter" centerTitle />
           <div style={{ marginTop: 14 }}>
             {pageBlocks.map(renderBlock)}
             {pageIdx === pages.length - 1 && (
@@ -3341,7 +3342,7 @@ const ReasonWhyAttachmentTextPdf = ({ data }) => {
   if (attachment.kind !== "docx" || !hasText(attachment.text)) return null;
   const ctx = reasonWhyContext(data);
   const blocks = withClientAcknowledgement(stripReasonWhyLeadingTitles(letterBodyBlocks(attachment.text), ctx));
-  const pages = chunkReasonWhyBlocks(blocks, 2750);
+  const pages = chunkReasonWhyBlocks(blocks, 2950);
   const renderBlock = (block, idx) => block.type === "heading" ? (
     <div key={idx} style={{ color: TEXT_COLOR, fontSize: 11.4, fontWeight: 700, lineHeight: 1.42, marginTop: idx === 0 ? 0 : 12, marginBottom: 7, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{block.text}</div>
   ) : (
@@ -3351,7 +3352,7 @@ const ReasonWhyAttachmentTextPdf = ({ data }) => {
     <>
       {pages.map((pageBlocks, pageIdx) => (
         <ReasonWhyPage key={`attachment-${pageIdx}`}>
-          <TritonLetterheadHeader compact />
+          <TritonLetterheadHeader title="Reason Why Letter" compact centerTitle />
           <div style={{ marginTop: 10 }}>
             {pageBlocks.map(renderBlock)}
             {pageIdx === pages.length - 1 && (
@@ -3779,16 +3780,16 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
       if (i > 0) pdf.addPage("letter", pageOrientation);
       const pageWmm = pdf.internal.pageSize.getWidth();
       const pageHmm = pdf.internal.pageSize.getHeight();
-      const canvas = await html2canvas(pageEl, { scale: 2, useCORS: true, backgroundColor: "#ffffff" });
-      const imgData = canvas.toDataURL("image/jpeg", 0.92);
+      const canvas = await html2canvas(pageEl, { scale: 3, useCORS: true, backgroundColor: "#ffffff" });
+      const imgData = canvas.toDataURL("image/png");
       const imgW = pageWmm;
       const imgH = (canvas.height * imgW) / canvas.width;
       // Fit-to-width; if too tall, scale down to fit page
       if (imgH > pageHmm) {
         const scaledW = (imgW * pageHmm) / imgH;
-        pdf.addImage(imgData, "JPEG", (pageWmm - scaledW) / 2, 0, scaledW, pageHmm);
+        pdf.addImage(imgData, "PNG", (pageWmm - scaledW) / 2, 0, scaledW, pageHmm);
       } else {
-        pdf.addImage(imgData, "JPEG", 0, 0, imgW, imgH);
+        pdf.addImage(imgData, "PNG", 0, 0, imgW, imgH);
       }
     }
 
