@@ -164,8 +164,31 @@
     border: 1px solid var(--c-line-soft);
   }
 
-  /* Signature canvas */
-  .sig-canvas { background: #fff; border: 1px dashed var(--c-gold); border-radius: 4px; cursor: crosshair; touch-action: none; }
+  /* Adobe Sign signature placeholder */
+  .sig-placeholder {
+    background: linear-gradient(135deg, #fffaf0 0%, #fff3c4 100%);
+    border: 1px dashed var(--c-gold);
+    border-radius: 4px;
+    min-height: 82px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--c-bg-deep);
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  .sig-note { color: #8a6a14; font-size: 11px; margin-top: 5px; }
+  .validation-alert {
+    border: 1px solid #fecaca;
+    background: #fff1f2;
+    color: #991b1b;
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 13px;
+    font-weight: 600;
+  }
 
   /* Choice cards for business-type / leverage / insurance company selection */
   .choice-card {
@@ -364,6 +387,7 @@ const AUTH_CUSTOM_PASSWORD_HASH_KEY = "triton_kyc_custom_password_hash_v1";
 const AUTH_PASSWORD_HASH = "b4d892dcdd1c8a38a97f6cfcac5bf20075d10947cd9cde9d41e18d2bb2f216d9";
 const STORAGE_KEY_LEGACY = "triton_compliance_draft_v1";   // single object (kept for migration)
 const STORAGE_KEY        = "triton_compliance_drafts_v2";  // array of drafts
+const DEFAULT_ADVISOR_NAME = "Jie Yuan";
 
 const loadDraftsList = () => {
   try {
@@ -420,6 +444,7 @@ const splitFullName = (name) => {
 };
 const fullClientName = (ad = {}) => (ad.client1Name || ad.clientName || "").trim();
 const fullHouseholdName = (ad = {}) => [fullClientName(ad), ad.client2Name].filter(Boolean).join(" / ");
+const hasText = (v) => String(v || "").trim().length > 0;
 const getSmartNameTargets = (formData, primaryName, spouseName) => {
   const primary = splitFullName(primaryName);
   const spouse = splitFullName(spouseName);
@@ -440,6 +465,35 @@ const getSmartNameTargets = (formData, primaryName, spouseName) => {
     ["lifeInsurance.needsAnalysis.clientName", primaryName],
     ["lifeInsurance.needsAnalysis.policyOwnerName", primaryName],
   ];
+};
+
+const getCurrentStepClientNameErrors = (formData, stepKey) => {
+  const sf = formData.segregatedFundInvestment || {};
+  const lc = sf.leverageCompliance || {};
+  const nl = sf.nonLeverageCompliance || {};
+  const q = sf.insuranceQuestionnaire || {};
+  const li = formData.lifeInsurance?.needsAnalysis || {};
+  const errors = [];
+  const missing = (ok, label) => { if (!ok) errors.push(label); };
+
+  if (stepKey === "advisorDisclosure") missing(hasText(fullClientName(formData.advisorDisclosure || {})), "Advisor Disclosure client name is required.");
+  if (stepKey === "leverageCompliance") missing(hasText(lc.clientNameAck) || hasText(lc.clientFirst) || hasText(lc.clientLast), "Leverage KYC client name is required.");
+  if (stepKey === "nonLeverageCompliance") missing(hasText(nl.clientNames), "Sales Suitability client name is required.");
+  if (stepKey === "manulife") missing(hasText(q.manulife?.firstName) || hasText(q.manulife?.surname), "Manulife client name is required.");
+  if (stepKey === "iaFinancial") missing(hasText(q.iaFinancial?.lastFirstName), "iA Financial client name is required.");
+  if (stepKey === "canadaLife") missing(hasText(q.canadaLife?.name), "Canada Life client name is required.");
+  if (stepKey === "equitableLife") missing(hasText(q.equitableLife?.clientName), "Equitable Life client name is required.");
+  if (stepKey === "needsAnalysis") missing(hasText(li.clientName), "Insurance Needs Analysis client name is required.");
+
+  return errors;
+};
+
+const getRequiredClientNameErrors = (formData) => {
+  const errors = [];
+  ["advisorDisclosure", ...buildSteps(formData).map(s => s.key)]
+    .filter((key, idx, arr) => arr.indexOf(key) === idx)
+    .forEach(key => errors.push(...getCurrentStepClientNameErrors(formData, key)));
+  return errors;
 };
 
 const makeInvestmentPropertyRow = (row = {}) => ({
@@ -496,6 +550,12 @@ function normalizeFormData(formData) {
     ].filter(Boolean);
     lc.netWorth.otherItems = ensureRows(lc.netWorth.otherItems || legacyNetWorthRows, makeNetWorthOtherRow);
     lc.debt = ensureRows((lc.debt || []).map(makeDebtRow), makeDebtRow);
+    if (!hasText(lc.advisorNameAck)) lc.advisorNameAck = DEFAULT_ADVISOR_NAME;
+  }
+
+  const iq = fd.segregatedFundInvestment?.insuranceQuestionnaire;
+  if (iq?.iaFinancial && !hasText(iq.iaFinancial.agentName)) {
+    iq.iaFinancial.agentName = DEFAULT_ADVISOR_NAME;
   }
 
   const li = fd.lifeInsurance?.needsAnalysis;
@@ -511,6 +571,7 @@ function normalizeFormData(formData) {
       ? [makeOtherLiquidRow({ marketValue: li.liquidAssets.otherMV, loan: li.liquidAssets.otherLoan })]
       : null;
     li.liquidAssets.otherItems = ensureRows(li.liquidAssets.otherItems || legacyLiquidRows, makeOtherLiquidRow);
+    if (!hasText(li.advisorName)) li.advisorName = DEFAULT_ADVISOR_NAME;
   }
   return fd;
 }
@@ -615,7 +676,7 @@ const initialFormData = {
       notes: "",
       clientNameAck: "", clientSigAck: "", clientDateAck: "",
       jointNameAck: "", jointSigAck: "", jointDateAck: "",
-      advisorNameAck: "", advisorSigAck: "", advisorDateAck: "",
+      advisorNameAck: DEFAULT_ADVISOR_NAME, advisorSigAck: "", advisorDateAck: "",
     },
     nonLeverageCompliance: {
       clientNames: "",
@@ -657,7 +718,7 @@ const initialFormData = {
         choiceMatchesProfile: "", reasonReducedFunds: false, reasonOther: false, reasonOtherText: "",
         clientInitials: "",
         clientSignature: "", signedIn: "", signedDate: "",
-        agentSignature: "", bmInitials: "",
+        agentName: DEFAULT_ADVISOR_NAME, agentSignature: "", bmInitials: "",
       },
       canadaLife: {
         q1: "", q2: "", q3: "", q4: "", q5: "",
@@ -689,7 +750,7 @@ const initialFormData = {
       newCoverageCI: "", newCoverageLife: "",
       annualPremium: "",
       policyOwnerName: "", policyOwnerSignature: "", policyOwnerDate: "",
-      advisorName: "", advisorSignature: "", advisorDate: "",
+      advisorName: DEFAULT_ADVISOR_NAME, advisorSignature: "", advisorDate: "",
     }
   },
 };
@@ -750,67 +811,13 @@ const Checkbox = ({ checked, onChange, label }) => (
 /* ============================================================
    SIGNATURE FIELD
    ============================================================ */
-const SignatureField = ({ value, onChange, label = "Signature" }) => {
-  const canvasRef = useRef(null);
-  const drawing = useRef(false);
-  const lastPos = useRef({x:0,y:0});
-
-  useEffect(() => {
-    const c = canvasRef.current; if (!c) return;
-    const ctx = c.getContext("2d");
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0,0,c.width,c.height);
-    if (value && value.startsWith("data:image")) {
-      const img = new Image();
-      img.onload = () => { ctx.drawImage(img, 0, 0); };
-      img.src = value;
-    }
-  }, []);
-
-  const getPos = (e) => {
-    const c = canvasRef.current;
-    const rect = c.getBoundingClientRect();
-    const t = e.touches ? e.touches[0] : e;
-    return { x: (t.clientX - rect.left) * (c.width / rect.width), y: (t.clientY - rect.top) * (c.height / rect.height) };
-  };
-
-  const start = (e) => { e.preventDefault(); drawing.current = true; lastPos.current = getPos(e); };
-  const move = (e) => {
-    if (!drawing.current) return;
-    e.preventDefault();
-    const c = canvasRef.current;
-    const ctx = c.getContext("2d");
-    const p = getPos(e);
-    ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.strokeStyle = "#1a2744";
-    ctx.beginPath(); ctx.moveTo(lastPos.current.x, lastPos.current.y); ctx.lineTo(p.x, p.y); ctx.stroke();
-    lastPos.current = p;
-  };
-  const end = () => {
-    if (!drawing.current) return;
-    drawing.current = false;
-    const c = canvasRef.current;
-    onChange(c.toDataURL("image/png"));
-  };
-  const clear = () => {
-    const c = canvasRef.current;
-    const ctx = c.getContext("2d");
-    ctx.fillStyle = "#fff"; ctx.fillRect(0,0,c.width,c.height);
-    onChange("");
-  };
-
-  return (
-    <div>
-      <label className="block text-sm font-medium text-navy mb-1">{label}</label>
-      <canvas
-        ref={canvasRef} width={500} height={120}
-        className="sig-canvas w-full"
-        onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end}
-        onTouchStart={start} onTouchMove={move} onTouchEnd={end}
-      />
-      <button type="button" onClick={clear} className="mt-1 text-xs text-gray-500 hover:text-navy underline">Clear signature</button>
-    </div>
-  );
-};
+const SignatureField = ({ label = "Signature" }) => (
+  <div>
+    <label className="block text-sm font-medium text-navy mb-1">{label}</label>
+    <div className="sig-placeholder">Adobe Sign Field</div>
+    <div className="sig-note">Highlighted for Adobe Sign placement after PDF export.</div>
+  </div>
+);
 
 /* ============================================================
    STEP DEFINITIONS
@@ -929,7 +936,7 @@ const AdvisorDisclosureForm = ({ data, update }) => {
         <div className="text-sm text-gray-700 mb-3">
           <span>I, </span>
           <input type="text" value={d.clientName} onChange={e => set("clientName", e.target.value)} placeholder="(Client Name)" className="inline-block max-w-xs mx-1" style={{display:"inline-block", width:"250px"}}/>
-          <span> (Client Name) acknowledge that I have reviewed this document. I understand any conflicts of interest or potential conflicts of interest outlined in this document. I also consent to a client file being created and maintained for me.</span>
+          <span> (Client Name)<span className="text-red-700 font-semibold"> *</span> acknowledge that I have reviewed this document. I understand any conflicts of interest or potential conflicts of interest outlined in this document. I also consent to a client file being created and maintained for me.</span>
         </div>
         <Checkbox checked={d.spouseConsent} onChange={v => set("spouseConsent", v)} label="I consent to my personal information being maintained in a joint client file with my spouse and being disclosed to my spouse. Requires signature of spouse, if selected." />
 
@@ -1110,8 +1117,8 @@ const LeverageComplianceForm = ({ data, update, markManualNamePath = () => {} })
 
       <div className="section-header">CLIENT INFORMATION</div>
       <div className="grid md:grid-cols-2 gap-3">
-        <Field label="Last Name of Client"><TextInput value={d.clientLast} onChange={v => { markManualNamePath("segregatedFundInvestment.leverageCompliance.clientLast"); set("clientLast", v); }}/></Field>
-        <Field label="First Name of Client"><TextInput value={d.clientFirst} onChange={v => { markManualNamePath("segregatedFundInvestment.leverageCompliance.clientFirst"); set("clientFirst", v); }}/></Field>
+        <Field label="Last Name of Client" required><TextInput value={d.clientLast} onChange={v => { markManualNamePath("segregatedFundInvestment.leverageCompliance.clientLast"); set("clientLast", v); }}/></Field>
+        <Field label="First Name of Client" required><TextInput value={d.clientFirst} onChange={v => { markManualNamePath("segregatedFundInvestment.leverageCompliance.clientFirst"); set("clientFirst", v); }}/></Field>
         <Field label="Last Name of Joint Client"><TextInput value={d.jointLast} onChange={v => { markManualNamePath("segregatedFundInvestment.leverageCompliance.jointLast"); set("jointLast", v); }}/></Field>
         <Field label="First Name of Joint Client"><TextInput value={d.jointFirst} onChange={v => { markManualNamePath("segregatedFundInvestment.leverageCompliance.jointFirst"); set("jointFirst", v); }}/></Field>
       </div>
@@ -1289,7 +1296,7 @@ const LeverageComplianceForm = ({ data, update, markManualNamePath = () => {} })
       <div className="section-header">CLIENT AND ADVISOR ACKNOWLEDGEMENT</div>
       <div className="text-sm text-gray-700">I/We have reviewed this Leveraging Analysis &amp; Disclosure with our advisor, and understand the material features and risks involved with this leveraging strategy.</div>
       <div className="grid md:grid-cols-3 gap-3">
-        <Field label="Client Name"><TextInput value={d.clientNameAck} onChange={v=>{ markManualNamePath("segregatedFundInvestment.leverageCompliance.clientNameAck"); set("clientNameAck",v); }}/></Field>
+        <Field label="Client Name" required><TextInput value={d.clientNameAck} onChange={v=>{ markManualNamePath("segregatedFundInvestment.leverageCompliance.clientNameAck"); set("clientNameAck",v); }}/></Field>
         <div><SignatureField value={d.clientSigAck} onChange={v=>set("clientSigAck",v)} label="Client Signature"/></div>
         <Field label="Date"><TextInput type="date" value={d.clientDateAck} onChange={v=>set("clientDateAck",v)}/></Field>
         <Field label="Joint Applicant Name"><TextInput value={d.jointNameAck} onChange={v=>{ markManualNamePath("segregatedFundInvestment.leverageCompliance.jointNameAck"); set("jointNameAck",v); }}/></Field>
@@ -1501,8 +1508,8 @@ const ManulifeQuestionnaire = ({ data, update, markManualNamePath = () => {} }) 
       <div className="section-header-light">Investor information</div>
       <div className="grid md:grid-cols-4 gap-3">
         <Field label="Salutation"><Select value={d.salutation} onChange={v=>set("salutation",v)} options={["Mr.","Mrs.","Miss","Ms.","Dr."]}/></Field>
-        <Field label="Surname"><TextInput value={d.surname} onChange={v=>{ markManualNamePath("segregatedFundInvestment.insuranceQuestionnaire.manulife.surname"); set("surname",v); }}/></Field>
-        <Field label="First name"><TextInput value={d.firstName} onChange={v=>{ markManualNamePath("segregatedFundInvestment.insuranceQuestionnaire.manulife.firstName"); set("firstName",v); }}/></Field>
+        <Field label="Surname" required><TextInput value={d.surname} onChange={v=>{ markManualNamePath("segregatedFundInvestment.insuranceQuestionnaire.manulife.surname"); set("surname",v); }}/></Field>
+        <Field label="First name" required><TextInput value={d.firstName} onChange={v=>{ markManualNamePath("segregatedFundInvestment.insuranceQuestionnaire.manulife.firstName"); set("firstName",v); }}/></Field>
         <Field label="Initials"><TextInput value={d.initials} onChange={v=>set("initials",v)}/></Field>
         <Field label="Date completed"><TextInput type="date" value={d.dateCompleted} onChange={v=>set("dateCompleted",v)}/></Field>
       </div>
@@ -1656,7 +1663,7 @@ const IAFinancialQuestionnaire = ({ data, update, markManualNamePath = () => {} 
 
       <div className="section-header-light">Information</div>
       <div className="grid md:grid-cols-2 gap-3">
-        <Field label="Last and first name"><TextInput value={d.lastFirstName} onChange={v=>{ markManualNamePath("segregatedFundInvestment.insuranceQuestionnaire.iaFinancial.lastFirstName"); set("lastFirstName",v); }}/></Field>
+        <Field label="Last and first name" required><TextInput value={d.lastFirstName} onChange={v=>{ markManualNamePath("segregatedFundInvestment.insuranceQuestionnaire.iaFinancial.lastFirstName"); set("lastFirstName",v); }}/></Field>
         <Field label="Date of birth"><TextInput type="date" value={d.dateOfBirth} onChange={v=>set("dateOfBirth",v)}/></Field>
         <Field label="Profession"><TextInput value={d.profession} onChange={v=>set("profession",v)}/></Field>
         <Field label="Employer"><TextInput value={d.employer} onChange={v=>set("employer",v)}/></Field>
@@ -1713,6 +1720,7 @@ const IAFinancialQuestionnaire = ({ data, update, markManualNamePath = () => {} 
           <Field label="On (date)"><TextInput type="date" value={d.signedDate} onChange={v=>set("signedDate",v)}/></Field>
         </div>
         <div className="border rounded p-3">
+          <Field label="Agent Name"><TextInput value={d.agentName} onChange={v=>set("agentName",v)}/></Field>
           <SignatureField value={d.agentSignature} onChange={v=>set("agentSignature",v)} label="Agent's signature"/>
           <Field label="BM initials"><TextInput value={d.bmInitials} onChange={v=>set("bmInitials",v)} maxLength={5}/></Field>
         </div>
@@ -2005,7 +2013,7 @@ const LifeInsuranceNeedsAnalysisForm = ({ data, update, markManualNamePath = () 
       <table className="kyc-table">
         <tbody>
           <tr>
-            <th>Client's Name</th><td><TextInput value={d.clientName} onChange={v=>{ markManualNamePath("lifeInsurance.needsAnalysis.clientName"); set("clientName",v); }}/></td>
+            <th>Client's Name<span className="text-red-700 font-semibold"> *</span></th><td><TextInput value={d.clientName} onChange={v=>{ markManualNamePath("lifeInsurance.needsAnalysis.clientName"); set("clientName",v); }}/></td>
             <th>Occupation</th><td><TextInput value={d.occupation} onChange={v=>set("occupation",v)}/></td>
           </tr>
           <tr>
@@ -2205,6 +2213,12 @@ const ReviewSummaryRow = ({ label, value }) => (
   <div className="flex justify-between py-1 border-b border-gray-100 text-sm">
     <span className="text-gray-600">{label}</span>
     <span className="font-medium text-navy text-right ml-4">{value || " - "}</span>
+  </div>
+);
+
+const ReviewSignaturePlaceholder = ({ label }) => (
+  <div className="mt-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
+    {label}: highlighted in PDF for Adobe Sign
   </div>
 );
 
@@ -2461,7 +2475,7 @@ const SigPlaceholder = ({ kind = "signature", label, width }) => {
   const w = width || (kind === "initials" ? 70 : kind === "date" ? 130 : 210);
   return (
     <div style={{ display: "inline-block", verticalAlign: "bottom", marginRight: 14, marginBottom: 4 }}>
-      <div style={{ width: w, height: 24, borderBottom: "1px solid " + NAVY }}/>
+      <div style={{ width: w, height: kind === "date" ? 24 : 30, border: "1px dashed " + GOLD, background: "#fff4cc", borderRadius: 4 }}/>
       <div style={{ fontSize: PDF_TYPE.footer, color: TEXT_SOFT, letterSpacing: 0.6, textTransform: "uppercase", fontWeight: 650, marginTop: 3 }}>
         {defaultLabel}
       </div>
@@ -2816,7 +2830,7 @@ const IAQpdf = ({ q }) => (
       <PdfText size={9}>I have reviewed this investor profile, I recognize it is accurate and I confirm having received a copy of it.</PdfText>
       <div style={{ marginTop: 8 }}>
         <SigBlock signer="signer2" name={q.lastFirstName} role="Client"/>
-        <SigBlock signer="signer1" name="Jie Yuan" role="Agent"/>
+        <SigBlock signer="signer1" name={q.agentName || DEFAULT_ADVISOR_NAME} role="Agent"/>
         <SigPlaceholder kind="initials" signer="signer2" label="Client Initials" width={70}/>
       </div>
     </PdfSection>
@@ -3232,6 +3246,11 @@ const ReviewAndGeneratePDF = ({ data, goToStep }) => {
   };
 
   const downloadPdf = async () => {
+    const missingClientNames = getRequiredClientNameErrors(data);
+    if (missingClientNames.length) {
+      alert("Please complete required client name fields before generating PDF:\n\n" + missingClientNames.join("\n"));
+      return;
+    }
     setGenerating(true);
     try {
       const pdf = await buildPdf();
@@ -3248,6 +3267,8 @@ const ReviewAndGeneratePDF = ({ data, goToStep }) => {
   };
 
   const getPdfBlob = async () => {
+    const missingClientNames = getRequiredClientNameErrors(data);
+    if (missingClientNames.length) throw new Error("Please complete required client name fields before sending:\n" + missingClientNames.join("\n"));
     const pdf = await buildPdf();
     return pdf.output("blob");
   };
@@ -3302,9 +3323,9 @@ const ReviewAndGeneratePDF = ({ data, goToStep }) => {
           <ReviewSummaryRow label="Client name (acknowledgment)" value={ad.clientName} />
           <ReviewSummaryRow label="Joint client file consent" value={ad.spouseConsent ? "Yes" : "No"} />
           <ReviewSummaryRow label="Client 1" value={`${ad.client1Name}${ad.client1Date ? " · "+ad.client1Date : ""}`} />
-          {ad.client1Signature && <div className="mt-1"><img src={ad.client1Signature} alt="sig" style={{maxHeight:60, border:"1px solid #eee"}}/></div>}
+          <ReviewSignaturePlaceholder label="Client 1 signature" />
           {ad.client2Name && <ReviewSummaryRow label="Client 2" value={`${ad.client2Name}${ad.client2Date ? " · "+ad.client2Date : ""}`} />}
-          {ad.client2Signature && <div className="mt-1"><img src={ad.client2Signature} alt="sig" style={{maxHeight:60, border:"1px solid #eee"}}/></div>}
+          {ad.client2Name && <ReviewSignaturePlaceholder label="Client 2 signature" />}
         </ReviewPanel>
 
         <ReviewPanel title="2. Business Type">
@@ -3325,8 +3346,8 @@ const ReviewAndGeneratePDF = ({ data, goToStep }) => {
             <ReviewSummaryRow label="Loan Start Date" value={sf.leverageCompliance.loanStartDate}/>
             <ReviewSummaryRow label="Payment Type" value={sf.leverageCompliance.paymentType}/>
             {sf.leverageCompliance.notes && <div className="mt-2"><div className="text-xs font-semibold text-navy">Notes:</div><div className="text-xs whitespace-pre-wrap text-gray-700">{sf.leverageCompliance.notes}</div></div>}
-            {sf.leverageCompliance.clientSigAck && <div className="mt-2"><div className="text-xs">Client signature:</div><img src={sf.leverageCompliance.clientSigAck} style={{maxHeight:50}}/></div>}
-            {sf.leverageCompliance.advisorSigAck && <div className="mt-1"><div className="text-xs">Advisor signature:</div><img src={sf.leverageCompliance.advisorSigAck} style={{maxHeight:50}}/></div>}
+            <ReviewSignaturePlaceholder label="Client signature" />
+            <ReviewSignaturePlaceholder label="Advisor signature" />
           </ReviewPanel>
         )}
 
@@ -3343,8 +3364,8 @@ const ReviewAndGeneratePDF = ({ data, goToStep }) => {
             <ReviewSummaryRow label="Guarantee" value={sf.nonLeverageCompliance.guarantee}/>
             {sf.nonLeverageCompliance.fundsRecommended && <div className="mt-1"><span className="text-xs font-semibold">Funds: </span><span className="text-xs">{sf.nonLeverageCompliance.fundsRecommended}</span></div>}
             {sf.nonLeverageCompliance.rationale && <div className="mt-1"><span className="text-xs font-semibold">Rationale: </span><span className="text-xs">{sf.nonLeverageCompliance.rationale}</span></div>}
-            {sf.nonLeverageCompliance.clientSignature && <div className="mt-2"><div className="text-xs">Client signature:</div><img src={sf.nonLeverageCompliance.clientSignature} style={{maxHeight:50}}/></div>}
-            {sf.nonLeverageCompliance.advisorSignature && <div className="mt-1"><div className="text-xs">Advisor signature:</div><img src={sf.nonLeverageCompliance.advisorSignature} style={{maxHeight:50}}/></div>}
+            <ReviewSignaturePlaceholder label="Client signature" />
+            <ReviewSignaturePlaceholder label="Advisor signature" />
           </ReviewPanel>
         )}
 
@@ -3398,8 +3419,8 @@ const ReviewAndGeneratePDF = ({ data, goToStep }) => {
                 <ReviewSummaryRow label="Annual Premium" value={money(li.annualPremium)}/>
               </div>
             </div>
-            {li.policyOwnerSignature && <div className="mt-2"><div className="text-xs">Policy Owner signature ({li.policyOwnerName}):</div><img src={li.policyOwnerSignature} style={{maxHeight:50}}/></div>}
-            {li.advisorSignature && <div className="mt-1"><div className="text-xs">Advisor signature ({li.advisorName}):</div><img src={li.advisorSignature} style={{maxHeight:50}}/></div>}
+            <ReviewSignaturePlaceholder label={`Policy Owner signature${li.policyOwnerName ? " (" + li.policyOwnerName + ")" : ""}`} />
+            <ReviewSignaturePlaceholder label={`Advisor signature${li.advisorName ? " (" + li.advisorName + ")" : ""}`} />
           </ReviewPanel>
         )}
 
@@ -3419,8 +3440,8 @@ const ManulifeReview = ({ d }) => (
     <ReviewSummaryRow label="Net financial assets" value={d.netFinancialAssets}/>
     <ReviewSummaryRow label="Experience" value={d.experience?.split(":")[0]}/>
     {["q1","q2","q3","q4","q5","q6","q7","q8"].map(k => d[k] && <ReviewSummaryRow key={k} label={`Q${k.slice(1)}`} value={d[k]}/>)}
-    {d.clientSignature && <div className="mt-2"><div className="text-xs">Client signature:</div><img src={d.clientSignature} style={{maxHeight:50}}/></div>}
-    {d.advisorSignature && <div className="mt-1"><div className="text-xs">Advisor signature:</div><img src={d.advisorSignature} style={{maxHeight:50}}/></div>}
+    <ReviewSignaturePlaceholder label="Client signature" />
+    <ReviewSignaturePlaceholder label="Advisor signature" />
   </div>
 );
 const IAReview = ({ d }) => (
@@ -3428,10 +3449,11 @@ const IAReview = ({ d }) => (
     <ReviewSummaryRow label="Application type" value={d.applicationType}/>
     <ReviewSummaryRow label="Name" value={d.lastFirstName}/>
     <ReviewSummaryRow label="DOB" value={d.dateOfBirth}/>
+    <ReviewSummaryRow label="Agent Name" value={d.agentName || DEFAULT_ADVISOR_NAME}/>
     <ReviewSummaryRow label="Choice matches profile?" value={d.choiceMatchesProfile}/>
     {["q1","q2","q3","q4","q5","q6","q7","q8"].map(k => d[k] && <ReviewSummaryRow key={k} label={`Q${k.slice(1)}`} value={d[k]}/>)}
-    {d.clientSignature && <div className="mt-2"><div className="text-xs">Client signature:</div><img src={d.clientSignature} style={{maxHeight:50}}/></div>}
-    {d.agentSignature && <div className="mt-1"><div className="text-xs">Agent signature:</div><img src={d.agentSignature} style={{maxHeight:50}}/></div>}
+    <ReviewSignaturePlaceholder label="Client signature" />
+    <ReviewSignaturePlaceholder label={`Agent signature${d.agentName ? " (" + d.agentName + ")" : ""}`} />
   </div>
 );
 const CanadaLifeReview = ({ d }) => (
@@ -3445,8 +3467,8 @@ const EquitableReview = ({ d }) => (
   <div>
     <ReviewSummaryRow label="Client Name" value={d.clientName}/>
     {["q1","q2","q3","q4","q5","q6","q7","q8","q9","q10"].map(k => d[k] && <ReviewSummaryRow key={k} label={`Q${k.slice(1)}`} value={d[k]}/>)}
-    {d.clientSignature && <div className="mt-2"><div className="text-xs">Client signature:</div><img src={d.clientSignature} style={{maxHeight:50}}/></div>}
-    {d.advisorSignature && <div className="mt-1"><div className="text-xs">Advisor signature:</div><img src={d.advisorSignature} style={{maxHeight:50}}/></div>}
+    <ReviewSignaturePlaceholder label="Client signature" />
+    <ReviewSignaturePlaceholder label="Advisor signature" />
   </div>
 );
 
@@ -3847,6 +3869,7 @@ const App = () => {
 
   const currentStep = steps[currentStepIdx];
   const stepKey = currentStep?.key;
+  const currentClientNameErrors = getCurrentStepClientNameErrors(formData, stepKey);
 
   const renderStep = () => {
     switch (stepKey) {
@@ -3870,6 +3893,7 @@ const App = () => {
     if (stepKey === "businessType" && !formData.businessType) return false;
     if (stepKey === "leverageSelection" && !formData.segregatedFundInvestment.leverageLoan) return false;
     if (stepKey === "insuranceSelection" && !formData.segregatedFundInvestment.selectedInsuranceCompany) return false;
+    if (currentClientNameErrors.length) return false;
     return true;
   };
 
@@ -3971,6 +3995,11 @@ const App = () => {
             <div className="form-card p-6 md:p-10">
               {renderStep()}
             </div>
+            {currentClientNameErrors.length > 0 && (
+              <div className="validation-alert mt-4 no-print">
+                {currentClientNameErrors[0]}
+              </div>
+            )}
 
             {/* ===== Step navigation buttons ===== */}
             <div className="mt-8 flex flex-col md:flex-row md:items-center md:justify-between gap-3 no-print">
