@@ -370,7 +370,7 @@ const loadDraftsList = () => {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) return parsed.map(d => ({ ...d, formData: normalizeFormData(d.formData) }));
     }
     // One-time migration from v1 single-draft schema
     const legacy = localStorage.getItem(STORAGE_KEY_LEGACY);
@@ -389,11 +389,131 @@ const makeId = () => "d_" + Date.now().toString(36) + "_" + Math.random().toStri
 const makeDraft = (formData) => ({
   id: makeId(),
   currentStep: 0,
-  formData: formData ? deepClone(formData) : deepClone(initialFormDataRef.current),
+  formData: normalizeFormData(formData ? deepClone(formData) : deepClone(initialFormDataRef.current)),
   updatedAt: Date.now(),
   createdAt: Date.now(),
 });
 const deepClone = (o) => JSON.parse(JSON.stringify(o));
+
+const makeRowId = () => "r_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
+const ensureRows = (rows, factory) => Array.isArray(rows) && rows.length ? rows : [factory()];
+const getPath = (obj, path) => path.split(".").reduce((acc, key) => acc?.[key], obj);
+const setPathImmutable = (obj, path, value) => {
+  const keys = path.split(".");
+  const clone = Array.isArray(obj) ? [...obj] : { ...obj };
+  let cur = clone;
+  keys.forEach((key, idx) => {
+    if (idx === keys.length - 1) {
+      cur[key] = value;
+      return;
+    }
+    const next = cur[key];
+    cur[key] = Array.isArray(next) ? [...next] : { ...(next || {}) };
+    cur = cur[key];
+  });
+  return clone;
+};
+const splitFullName = (name) => {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return { first: parts[0] || "", last: "" };
+  return { first: parts.slice(0, -1).join(" "), last: parts[parts.length - 1] };
+};
+const fullClientName = (ad = {}) => (ad.client1Name || ad.clientName || "").trim();
+const fullHouseholdName = (ad = {}) => [fullClientName(ad), ad.client2Name].filter(Boolean).join(" / ");
+const getSmartNameTargets = (formData, primaryName, spouseName) => {
+  const primary = splitFullName(primaryName);
+  const spouse = splitFullName(spouseName);
+  const household = fullHouseholdName(formData.advisorDisclosure || {});
+  return [
+    ["segregatedFundInvestment.leverageCompliance.clientFirst", primary.first],
+    ["segregatedFundInvestment.leverageCompliance.clientLast", primary.last],
+    ["segregatedFundInvestment.leverageCompliance.clientNameAck", primaryName],
+    ["segregatedFundInvestment.leverageCompliance.jointFirst", spouse.first],
+    ["segregatedFundInvestment.leverageCompliance.jointLast", spouse.last],
+    ["segregatedFundInvestment.leverageCompliance.jointNameAck", spouseName],
+    ["segregatedFundInvestment.nonLeverageCompliance.clientNames", household],
+    ["segregatedFundInvestment.insuranceQuestionnaire.manulife.firstName", primary.first],
+    ["segregatedFundInvestment.insuranceQuestionnaire.manulife.surname", primary.last],
+    ["segregatedFundInvestment.insuranceQuestionnaire.iaFinancial.lastFirstName", primaryName],
+    ["segregatedFundInvestment.insuranceQuestionnaire.canadaLife.name", primaryName],
+    ["segregatedFundInvestment.insuranceQuestionnaire.equitableLife.clientName", primaryName],
+    ["lifeInsurance.needsAnalysis.clientName", primaryName],
+    ["lifeInsurance.needsAnalysis.policyOwnerName", primaryName],
+  ];
+};
+
+const makeInvestmentPropertyRow = (row = {}) => ({
+  id: row.id || makeRowId(),
+  name: row.name || "Investment Property",
+  marketValue: row.marketValue ?? row.mv ?? row.investMV ?? "",
+  loan: row.loan ?? row.mortgage ?? row.investLoan ?? "",
+});
+const makeOtherLiquidRow = (row = {}) => ({
+  id: row.id || makeRowId(),
+  name: row.name || row.label || "Other Liquid Asset",
+  marketValue: row.marketValue ?? row.mv ?? row.otherMV ?? "",
+  loan: row.loan ?? row.otherLoan ?? "",
+});
+const makeIncomeOtherRow = (row = {}) => ({
+  id: row.id || makeRowId(),
+  label: row.label || row.name || "Other",
+  annual: row.annual ?? row.amount ?? "",
+  monthly: row.monthly ?? "",
+});
+const makeNetWorthOtherRow = (row = {}) => ({
+  id: row.id || makeRowId(),
+  label: row.label || row.name || "Other",
+  client: row.client ?? row.clientAmount ?? "",
+  joint: row.joint ?? row.jointAmount ?? "",
+});
+const makeDebtRow = (row = {}) => ({
+  type: row.type || "Other",
+  lender: row.lender || "",
+  balance: row.balance || "",
+  monthly: row.monthly || "",
+});
+
+function normalizeFormData(formData) {
+  const fd = deepClone(formData || initialFormDataRef.current || {});
+  fd.smartFill = fd.smartFill || { manual: {}, lastPrimaryName: "", lastSpouseName: "" };
+  fd.smartFill.manual = fd.smartFill.manual || {};
+
+  const lc = fd.segregatedFundInvestment?.leverageCompliance;
+  if (lc) {
+    lc.income = lc.income || {};
+    lc.incomeMonthly = lc.incomeMonthly || {};
+    const legacyIncomeRows = [
+      (lc.income.other1Label || lc.income.other1 || lc.incomeMonthly.other1) && makeIncomeOtherRow({ label: lc.income.other1Label, annual: lc.income.other1, monthly: lc.incomeMonthly.other1 }),
+      (lc.income.other2Label || lc.income.other2 || lc.incomeMonthly.other2) && makeIncomeOtherRow({ label: lc.income.other2Label, annual: lc.income.other2, monthly: lc.incomeMonthly.other2 }),
+    ].filter(Boolean);
+    lc.income.otherItems = ensureRows(lc.income.otherItems || legacyIncomeRows, makeIncomeOtherRow);
+
+    lc.netWorth = lc.netWorth || {};
+    const legacyNetWorthRows = [
+      (lc.netWorth.otherLabel || lc.netWorth.otherClient || lc.netWorth.otherJoint) && makeNetWorthOtherRow({ label: lc.netWorth.otherLabel, client: lc.netWorth.otherClient, joint: lc.netWorth.otherJoint }),
+      (lc.netWorth.other2Label || lc.netWorth.other2Client || lc.netWorth.other2Joint) && makeNetWorthOtherRow({ label: lc.netWorth.other2Label, client: lc.netWorth.other2Client, joint: lc.netWorth.other2Joint }),
+      (lc.netWorth.other3Label || lc.netWorth.other3Client || lc.netWorth.other3Joint) && makeNetWorthOtherRow({ label: lc.netWorth.other3Label, client: lc.netWorth.other3Client, joint: lc.netWorth.other3Joint }),
+    ].filter(Boolean);
+    lc.netWorth.otherItems = ensureRows(lc.netWorth.otherItems || legacyNetWorthRows, makeNetWorthOtherRow);
+    lc.debt = ensureRows((lc.debt || []).map(makeDebtRow), makeDebtRow);
+  }
+
+  const li = fd.lifeInsurance?.needsAnalysis;
+  if (li) {
+    li.fixedAssets = li.fixedAssets || {};
+    const legacyInvestRows = (li.fixedAssets.investMV || li.fixedAssets.investLoan)
+      ? [makeInvestmentPropertyRow({ marketValue: li.fixedAssets.investMV, loan: li.fixedAssets.investLoan })]
+      : null;
+    li.fixedAssets.investmentProperties = ensureRows(li.fixedAssets.investmentProperties || legacyInvestRows, makeInvestmentPropertyRow);
+
+    li.liquidAssets = li.liquidAssets || {};
+    const legacyLiquidRows = (li.liquidAssets.otherMV || li.liquidAssets.otherLoan)
+      ? [makeOtherLiquidRow({ marketValue: li.liquidAssets.otherMV, loan: li.liquidAssets.otherLoan })]
+      : null;
+    li.liquidAssets.otherItems = ensureRows(li.liquidAssets.otherItems || legacyLiquidRows, makeOtherLiquidRow);
+  }
+  return fd;
+}
 
 /* placeholder filled below after initialFormData is declared */
 const initialFormDataRef = { current: null };
@@ -467,6 +587,7 @@ const initialFormData = {
     client2Signature: "",
     client2Date: "",
   },
+  smartFill: { manual: {}, lastPrimaryName: "", lastSpouseName: "" },
   businessType: "",
   segregatedFundInvestment: {
     leverageLoan: "",
@@ -478,9 +599,9 @@ const initialFormData = {
       investmentObjectives: "",
       riskHigh: "", riskMedium: "", riskLow: "",
       timeHorizon: "",
-      income: { empClient:"", empJoint:"", investment:"", rental:"", other1Label:"", other1:"", other2Label:"", other2:"", totalAnnual:"", totalMonthly:"" },
+      income: { empClient:"", empJoint:"", investment:"", rental:"", other1Label:"", other1:"", other2Label:"", other2:"", otherItems: [makeIncomeOtherRow()], totalAnnual:"", totalMonthly:"" },
       incomeMonthly: { empClient:"", empJoint:"", investment:"", rental:"", other1:"", other2:"" },
-      netWorth: { regClient:"", regJoint:"", nonRegClient:"", nonRegJoint:"", fixedClient:"", fixedJoint:"", otherLabel:"", otherClient:"", otherJoint:"", other2Label:"", other2Client:"", other2Joint:"", other3Label:"", other3Client:"", other3Joint:"", total:"" },
+      netWorth: { regClient:"", regJoint:"", nonRegClient:"", nonRegJoint:"", fixedClient:"", fixedJoint:"", otherLabel:"", otherClient:"", otherJoint:"", other2Label:"", other2Client:"", other2Joint:"", other3Label:"", other3Client:"", other3Joint:"", otherItems: [makeNetWorthOtherRow()], total:"" },
       debt: [
         { type:"New Loan", lender:"", balance:"", monthly:"" },
         { type:"Existing Investment Loan", lender:"", balance:"", monthly:"" },
@@ -556,8 +677,8 @@ const initialFormData = {
     needsAnalysis: {
       clientName: "", occupation: "", age: "", industry: "",
       earnedIncome: "", unearnedIncome: "", spouseIncome: "",
-      fixedAssets: { principalMV: "", principalLoan: "", investMV: "", investLoan: "" },
-      liquidAssets: { regMV:"", regLoan:"", nonRegMV:"", nonRegLoan:"", bankMV:"", bankLoan:"", otherMV:"", otherLoan:"" },
+      fixedAssets: { principalMV: "", principalLoan: "", investMV: "", investLoan: "", investmentProperties: [makeInvestmentPropertyRow()] },
+      liquidAssets: { regMV:"", regLoan:"", nonRegMV:"", nonRegLoan:"", bankMV:"", bankLoan:"", otherMV:"", otherLoan:"", otherItems: [makeOtherLiquidRow()] },
       businessAssets: { revenue:"", netIncome:"", fmv:"" },
       foreignAssets: { withProofFMV:"", withProofValue:"", withoutProofFMV:"", withoutProofValue:"" },
       acbNetWorth: "",
@@ -891,42 +1012,63 @@ const LeverageLoanSelection = ({ data, update }) => {
 /* ============================================================
    STEP: LEVERAGE COMPLIANCE (Citistar 4-page KYC)
    ============================================================ */
-const LeverageComplianceForm = ({ data, update }) => {
+const LeverageComplianceForm = ({ data, update, markManualNamePath = () => {} }) => {
   const d = data.segregatedFundInvestment.leverageCompliance;
   const set = (k, v) => update("segregatedFundInvestment", {
     ...data.segregatedFundInvestment,
     leverageCompliance: { ...d, [k]: v }
   });
   const setNested = (parent, k, v) => set(parent, { ...d[parent], [k]: v });
+  const incomeOtherItems = ensureRows(d.income.otherItems, makeIncomeOtherRow);
+  const netWorthOtherItems = ensureRows(d.netWorth.otherItems, makeNetWorthOtherRow);
   const updateDebt = (i, k, v) => {
     const arr = d.debt.map((row, idx) => idx === i ? { ...row, [k]: v } : row);
     set("debt", arr);
   };
+  const updateIncomeOther = (i, k, v) => {
+    const rows = incomeOtherItems.map((row, idx) => idx === i ? { ...row, [k]: v } : row);
+    set("income", { ...d.income, otherItems: rows });
+  };
+  const updateNetWorthOther = (i, k, v) => {
+    const rows = netWorthOtherItems.map((row, idx) => idx === i ? { ...row, [k]: v } : row);
+    set("netWorth", { ...d.netWorth, otherItems: rows });
+  };
+  const removeIncomeOther = (i) => set("income", { ...d.income, otherItems: incomeOtherItems.length > 1 ? incomeOtherItems.filter((_, idx) => idx !== i) : incomeOtherItems });
+  const removeNetWorthOther = (i) => set("netWorth", { ...d.netWorth, otherItems: netWorthOtherItems.length > 1 ? netWorthOtherItems.filter((_, idx) => idx !== i) : netWorthOtherItems });
+  const addIncomeOther = () => set("income", { ...d.income, otherItems: [...incomeOtherItems, makeIncomeOtherRow()] });
+  const addNetWorthOther = () => set("netWorth", { ...d.netWorth, otherItems: [...netWorthOtherItems, makeNetWorthOtherRow()] });
+  const addDebt = () => set("debt", [...d.debt, makeDebtRow()]);
+  const removeDebt = (i) => set("debt", d.debt.length > 1 ? d.debt.filter((_, idx) => idx !== i) : d.debt);
 
   /* ---- auto-computed totals (kept fresh each render, not stored as separate state) ---- */
   const n = (v) => Number(v || 0);
-  const incomeKeys = ["empClient","empJoint","investment","rental","other1","other2"];
+  const incomeKeys = ["empClient","empJoint","investment","rental"];
   const totalAnnualIncome  = incomeKeys.reduce((s,k) => s + n(d.income[k]), 0);
+  const totalAnnualIncomeWithOther = totalAnnualIncome + incomeOtherItems.reduce((s,r) => s + n(r.annual), 0);
   const totalMonthlyIncome = incomeKeys.reduce((s,k) => s + n(d.incomeMonthly[k]), 0);
-  const nwKeys = ["regClient","regJoint","nonRegClient","nonRegJoint","fixedClient","fixedJoint","otherClient","otherJoint","other2Client","other2Joint","other3Client","other3Joint"];
+  const totalMonthlyIncomeWithOther = totalMonthlyIncome + incomeOtherItems.reduce((s,r) => s + n(r.monthly), 0);
+  const nwKeys = ["regClient","regJoint","nonRegClient","nonRegJoint","fixedClient","fixedJoint"];
   const totalNetWorth = nwKeys.reduce((s,k) => s + n(d.netWorth[k]), 0);
-  const netWorthClient = ["regClient","nonRegClient","fixedClient","otherClient","other2Client","other3Client"].reduce((s,k)=> s + n(d.netWorth[k]), 0);
-  const netWorthJoint  = ["regJoint","nonRegJoint","fixedJoint","otherJoint","other2Joint","other3Joint"].reduce((s,k)=> s + n(d.netWorth[k]), 0);
+  const otherNetWorthClient = netWorthOtherItems.reduce((s,r)=> s + n(r.client), 0);
+  const otherNetWorthJoint = netWorthOtherItems.reduce((s,r)=> s + n(r.joint), 0);
+  const totalNetWorthWithOther = totalNetWorth + otherNetWorthClient + otherNetWorthJoint;
+  const netWorthClient = ["regClient","nonRegClient","fixedClient"].reduce((s,k)=> s + n(d.netWorth[k]), 0) + otherNetWorthClient;
+  const netWorthJoint  = ["regJoint","nonRegJoint","fixedJoint"].reduce((s,k)=> s + n(d.netWorth[k]), 0) + otherNetWorthJoint;
   const totalLiab     = d.debt.reduce((s,r) => s + n(r.balance), 0);
   const totalMonthlyDebt = d.debt.reduce((s,r) => s + n(r.monthly), 0);
-  const liabPctNW = totalNetWorth > 0 ? (totalLiab / totalNetWorth) * 100 : 0;
-  const debtPctInc = totalAnnualIncome > 0 ? (totalMonthlyDebt * 12 / totalAnnualIncome) * 100 : 0;
+  const liabPctNW = totalNetWorthWithOther > 0 ? (totalLiab / totalNetWorthWithOther) * 100 : 0;
+  const debtPctInc = totalAnnualIncomeWithOther > 0 ? (totalMonthlyDebt * 12 / totalAnnualIncomeWithOther) * 100 : 0;
 
   /* Persist the derived totals back into the form data so the PDF reads them.
      We do this inside an effect so we don't re-render in a loop. */
   useEffect(() => {
     const patch = {
-      income: { ...d.income, totalAnnual: String(totalAnnualIncome || ""), totalMonthly: String(totalMonthlyIncome || "") },
-      netWorth: { ...d.netWorth, total: String(totalNetWorth || "") },
+      income: { ...d.income, otherItems: incomeOtherItems, totalAnnual: String(totalAnnualIncomeWithOther || ""), totalMonthly: String(totalMonthlyIncomeWithOther || "") },
+      netWorth: { ...d.netWorth, otherItems: netWorthOtherItems, total: String(totalNetWorthWithOther || "") },
       totalLiabilities: String(totalLiab || ""),
       totalMonthlyDebt: String(totalMonthlyDebt || ""),
-      liabPctNetWorth:  totalNetWorth > 0 ? liabPctNW.toFixed(1) + "%" : "",
-      debtPctIncome:    totalAnnualIncome > 0 ? debtPctInc.toFixed(1) + "%" : "",
+      liabPctNetWorth:  totalNetWorthWithOther > 0 ? liabPctNW.toFixed(1) + "%" : "",
+      debtPctIncome:    totalAnnualIncomeWithOther > 0 ? debtPctInc.toFixed(1) + "%" : "",
     };
     // Only write if something actually changed (avoids infinite re-render)
     const changed =
@@ -943,7 +1085,7 @@ const LeverageComplianceForm = ({ data, update }) => {
         leverageCompliance: { ...d, ...patch },
       });
     }
-  }, [totalAnnualIncome, totalMonthlyIncome, totalNetWorth, totalLiab, totalMonthlyDebt]);
+  }, [totalAnnualIncomeWithOther, totalMonthlyIncomeWithOther, totalNetWorthWithOther, totalLiab, totalMonthlyDebt]);
 
   const ComputedCell = ({ value, suffix = "", warn = false }) => (
     <div style={{
@@ -968,10 +1110,10 @@ const LeverageComplianceForm = ({ data, update }) => {
 
       <div className="section-header">CLIENT INFORMATION</div>
       <div className="grid md:grid-cols-2 gap-3">
-        <Field label="Last Name of Client"><TextInput value={d.clientLast} onChange={v => set("clientLast", v)}/></Field>
-        <Field label="First Name of Client"><TextInput value={d.clientFirst} onChange={v => set("clientFirst", v)}/></Field>
-        <Field label="Last Name of Joint Client"><TextInput value={d.jointLast} onChange={v => set("jointLast", v)}/></Field>
-        <Field label="First Name of Joint Client"><TextInput value={d.jointFirst} onChange={v => set("jointFirst", v)}/></Field>
+        <Field label="Last Name of Client"><TextInput value={d.clientLast} onChange={v => { markManualNamePath("segregatedFundInvestment.leverageCompliance.clientLast"); set("clientLast", v); }}/></Field>
+        <Field label="First Name of Client"><TextInput value={d.clientFirst} onChange={v => { markManualNamePath("segregatedFundInvestment.leverageCompliance.clientFirst"); set("clientFirst", v); }}/></Field>
+        <Field label="Last Name of Joint Client"><TextInput value={d.jointLast} onChange={v => { markManualNamePath("segregatedFundInvestment.leverageCompliance.jointLast"); set("jointLast", v); }}/></Field>
+        <Field label="First Name of Joint Client"><TextInput value={d.jointFirst} onChange={v => { markManualNamePath("segregatedFundInvestment.leverageCompliance.jointFirst"); set("jointFirst", v); }}/></Field>
       </div>
       <Field label="Leveraging">
         <RadioGroup vertical={false} name="leveragingType" value={d.leveragingType} onChange={v => set("leveragingType", v)}
@@ -1022,23 +1164,26 @@ const LeverageComplianceForm = ({ data, update }) => {
               <td><TextInput type="number" value={d.incomeMonthly[k]} onChange={v => setNested("incomeMonthly",k,v)}/></td>
             </tr>
           ))}
-          <tr>
-            <td><TextInput value={d.income.other1Label} onChange={v => setNested("income","other1Label",v)} placeholder="Other (Specify)"/></td>
-            <td><TextInput type="number" value={d.income.other1} onChange={v => setNested("income","other1",v)}/></td>
-            <td><TextInput type="number" value={d.incomeMonthly.other1} onChange={v => setNested("incomeMonthly","other1",v)}/></td>
-          </tr>
-          <tr>
-            <td><TextInput value={d.income.other2Label} onChange={v => setNested("income","other2Label",v)} placeholder="Other (Specify)"/></td>
-            <td><TextInput type="number" value={d.income.other2} onChange={v => setNested("income","other2",v)}/></td>
-            <td><TextInput type="number" value={d.incomeMonthly.other2} onChange={v => setNested("incomeMonthly","other2",v)}/></td>
-          </tr>
+          {incomeOtherItems.map((row, i) => (
+            <tr key={row.id || i}>
+              <td><TextInput value={row.label} onChange={v => updateIncomeOther(i, "label", v)} placeholder="Other (Specify)"/></td>
+              <td><TextInput type="number" value={row.annual} onChange={v => updateIncomeOther(i, "annual", v)}/></td>
+              <td>
+                <div className="flex items-center gap-2">
+                  <TextInput type="number" value={row.monthly} onChange={v => updateIncomeOther(i, "monthly", v)}/>
+                  <button type="button" className="px-2 py-1 border rounded text-xs text-gray-600" onClick={() => removeIncomeOther(i)} disabled={incomeOtherItems.length <= 1}>Remove</button>
+                </div>
+              </td>
+            </tr>
+          ))}
           <tr style={{ background: "#FAFAF6" }}>
             <td className="font-semibold" style={{ color: "#0B1E3F" }}>Total Income <span className="text-xs font-normal text-gray-500">(auto)</span></td>
-            <td><ComputedCell value={fmt$(totalAnnualIncome)}/></td>
-            <td><ComputedCell value={fmt$(totalMonthlyIncome)}/></td>
+            <td><ComputedCell value={fmt$(totalAnnualIncomeWithOther)}/></td>
+            <td><ComputedCell value={fmt$(totalMonthlyIncomeWithOther)}/></td>
           </tr>
         </tbody>
       </table>
+      <button type="button" onClick={addIncomeOther} className="px-3 py-2 border border-[#C9A961] text-[#0B1E3F] rounded text-sm font-medium">+ Add Other Income</button>
 
       <div className="section-header-light">TOTAL NET WORTH ($)</div>
       <div className="text-xs text-gray-600 italic">New loan + Existing debts should not exceed 30%</div>
@@ -1054,21 +1199,18 @@ const LeverageComplianceForm = ({ data, update }) => {
           <tr><td>Fixed Assets</td>
             <td><TextInput type="number" value={d.netWorth.fixedClient} onChange={v=>setNested("netWorth","fixedClient",v)}/></td>
             <td><TextInput type="number" value={d.netWorth.fixedJoint} onChange={v=>setNested("netWorth","fixedJoint",v)}/></td></tr>
-          <tr>
-            <td><TextInput value={d.netWorth.otherLabel} onChange={v=>setNested("netWorth","otherLabel",v)} placeholder="Other (Specify)"/></td>
-            <td><TextInput type="number" value={d.netWorth.otherClient} onChange={v=>setNested("netWorth","otherClient",v)}/></td>
-            <td><TextInput type="number" value={d.netWorth.otherJoint} onChange={v=>setNested("netWorth","otherJoint",v)}/></td>
-          </tr>
-          <tr>
-            <td><TextInput value={d.netWorth.other2Label} onChange={v=>setNested("netWorth","other2Label",v)} placeholder="Other (Specify)"/></td>
-            <td><TextInput type="number" value={d.netWorth.other2Client} onChange={v=>setNested("netWorth","other2Client",v)}/></td>
-            <td><TextInput type="number" value={d.netWorth.other2Joint} onChange={v=>setNested("netWorth","other2Joint",v)}/></td>
-          </tr>
-          <tr>
-            <td><TextInput value={d.netWorth.other3Label} onChange={v=>setNested("netWorth","other3Label",v)} placeholder="Other (Specify)"/></td>
-            <td><TextInput type="number" value={d.netWorth.other3Client} onChange={v=>setNested("netWorth","other3Client",v)}/></td>
-            <td><TextInput type="number" value={d.netWorth.other3Joint} onChange={v=>setNested("netWorth","other3Joint",v)}/></td>
-          </tr>
+          {netWorthOtherItems.map((row, i) => (
+            <tr key={row.id || i}>
+              <td><TextInput value={row.label} onChange={v=>updateNetWorthOther(i, "label", v)} placeholder="Other (Specify)"/></td>
+              <td><TextInput type="number" value={row.client} onChange={v=>updateNetWorthOther(i, "client", v)}/></td>
+              <td>
+                <div className="flex items-center gap-2">
+                  <TextInput type="number" value={row.joint} onChange={v=>updateNetWorthOther(i, "joint", v)}/>
+                  <button type="button" className="px-2 py-1 border rounded text-xs text-gray-600" onClick={() => removeNetWorthOther(i)} disabled={netWorthOtherItems.length <= 1}>Remove</button>
+                </div>
+              </td>
+            </tr>
+          ))}
           <tr style={{ background: "#FAFAF6" }}>
             <td className="font-semibold" style={{ color: "#0B1E3F" }}>Subtotals <span className="text-xs font-normal text-gray-500">(auto)</span></td>
             <td><ComputedCell value={fmt$(netWorthClient)}/></td>
@@ -1076,15 +1218,16 @@ const LeverageComplianceForm = ({ data, update }) => {
           </tr>
           <tr style={{ background: "#FAFAF6" }}>
             <td className="font-semibold" style={{ color: "#0B1E3F" }}>Total Net Worth <span className="text-xs font-normal text-gray-500">(auto)</span></td>
-            <td colSpan="2"><ComputedCell value={fmt$(totalNetWorth)}/></td>
+            <td colSpan="2"><ComputedCell value={fmt$(totalNetWorthWithOther)}/></td>
           </tr>
         </tbody>
       </table>
+      <button type="button" onClick={addNetWorthOther} className="px-3 py-2 border border-[#C9A961] text-[#0B1E3F] rounded text-sm font-medium">+ Add Other Net Worth</button>
 
       <div className="section-header-light">TOTAL DEBT PAYMENTS (New loan + existing loans)</div>
       <div className="text-xs text-gray-600">Does the client and/or joint applicant have any existing debt? If yes, please indicate in addition to any new loan information.</div>
       <table className="kyc-table">
-        <thead><tr><th>Debt Type</th><th>Lender</th><th>Balance Outstanding ($)</th><th>Monthly Payments ($)</th></tr></thead>
+        <thead><tr><th>Debt Type</th><th>Lender</th><th>Balance Outstanding ($)</th><th>Monthly Payments ($)</th><th></th></tr></thead>
         <tbody>
           {d.debt.map((row, i) => (
             <tr key={i}>
@@ -1092,15 +1235,17 @@ const LeverageComplianceForm = ({ data, update }) => {
               <td><TextInput value={row.lender} onChange={v => updateDebt(i,"lender",v)}/></td>
               <td><TextInput type="number" value={row.balance} onChange={v => updateDebt(i,"balance",v)}/></td>
               <td><TextInput type="number" value={row.monthly} onChange={v => updateDebt(i,"monthly",v)}/></td>
+              <td><button type="button" className="px-2 py-1 border rounded text-xs text-gray-600" onClick={() => removeDebt(i)} disabled={d.debt.length <= 1}>Remove</button></td>
             </tr>
           ))}
         </tbody>
       </table>
+      <button type="button" onClick={addDebt} className="px-3 py-2 border border-[#C9A961] text-[#0B1E3F] rounded text-sm font-medium">+ Add Debt</button>
       <div className="grid md:grid-cols-2 gap-3">
         <Field label="Total Liabilities ($) — auto"><ComputedCell value={fmt$(totalLiab)}/></Field>
-        <Field label="% of Total Net Worth (≤30%)"><ComputedCell value={totalNetWorth > 0 ? liabPctNW.toFixed(1) + "%" : "—"} warn={liabPctNW > 30}/></Field>
+        <Field label="% of Total Net Worth (≤30%)"><ComputedCell value={totalNetWorthWithOther > 0 ? liabPctNW.toFixed(1) + "%" : "—"} warn={liabPctNW > 30}/></Field>
         <Field label="Total Monthly Debt Payments ($) — auto"><ComputedCell value={fmt$(totalMonthlyDebt)}/></Field>
-        <Field label="% of Total Annual Income (≤35%)"><ComputedCell value={totalAnnualIncome > 0 ? debtPctInc.toFixed(1) + "%" : "—"} warn={debtPctInc > 35}/></Field>
+        <Field label="% of Total Annual Income (≤35%)"><ComputedCell value={totalAnnualIncomeWithOther > 0 ? debtPctInc.toFixed(1) + "%" : "—"} warn={debtPctInc > 35}/></Field>
       </div>
 
       <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm">
@@ -1144,10 +1289,10 @@ const LeverageComplianceForm = ({ data, update }) => {
       <div className="section-header">CLIENT AND ADVISOR ACKNOWLEDGEMENT</div>
       <div className="text-sm text-gray-700">I/We have reviewed this Leveraging Analysis &amp; Disclosure with our advisor, and understand the material features and risks involved with this leveraging strategy.</div>
       <div className="grid md:grid-cols-3 gap-3">
-        <Field label="Client Name"><TextInput value={d.clientNameAck} onChange={v=>set("clientNameAck",v)}/></Field>
+        <Field label="Client Name"><TextInput value={d.clientNameAck} onChange={v=>{ markManualNamePath("segregatedFundInvestment.leverageCompliance.clientNameAck"); set("clientNameAck",v); }}/></Field>
         <div><SignatureField value={d.clientSigAck} onChange={v=>set("clientSigAck",v)} label="Client Signature"/></div>
         <Field label="Date"><TextInput type="date" value={d.clientDateAck} onChange={v=>set("clientDateAck",v)}/></Field>
-        <Field label="Joint Applicant Name"><TextInput value={d.jointNameAck} onChange={v=>set("jointNameAck",v)}/></Field>
+        <Field label="Joint Applicant Name"><TextInput value={d.jointNameAck} onChange={v=>{ markManualNamePath("segregatedFundInvestment.leverageCompliance.jointNameAck"); set("jointNameAck",v); }}/></Field>
         <div><SignatureField value={d.jointSigAck} onChange={v=>set("jointSigAck",v)} label="Joint Applicant Signature"/></div>
         <Field label="Date"><TextInput type="date" value={d.jointDateAck} onChange={v=>set("jointDateAck",v)}/></Field>
       </div>
@@ -1164,7 +1309,7 @@ const LeverageComplianceForm = ({ data, update }) => {
 /* ============================================================
    STEP: NON-LEVERAGE (Sales Suitability Summary)
    ============================================================ */
-const NonLeverageComplianceForm = ({ data, update }) => {
+const NonLeverageComplianceForm = ({ data, update, markManualNamePath = () => {} }) => {
   const d = data.segregatedFundInvestment.nonLeverageCompliance;
   const set = (k,v) => update("segregatedFundInvestment", {
     ...data.segregatedFundInvestment,
@@ -1177,7 +1322,7 @@ const NonLeverageComplianceForm = ({ data, update }) => {
       <h2 className="text-2xl font-bold text-navy text-center">Sales suitability summary  -  segregated funds</h2>
       <div className="text-xs text-red-700 italic">Documentation should be descriptive, detailed and thorough to adequately support the sale. Completion of this document alone does not replace a full fact-find or needs analysis for more complex sales.</div>
 
-      <Field label="Client name(s)" required><TextInput value={d.clientNames} onChange={v=>set("clientNames",v)}/></Field>
+      <Field label="Client name(s)" required><TextInput value={d.clientNames} onChange={v=>{ markManualNamePath("segregatedFundInvestment.nonLeverageCompliance.clientNames"); set("clientNames",v); }}/></Field>
 
       <div className="section-header-light">Client facts</div>
       <div className="grid md:grid-cols-2 gap-4">
@@ -1308,7 +1453,7 @@ const InsuranceCompanySelection = ({ data, update }) => {
 /* ============================================================
    QUESTIONNAIRE: MANULIFE
    ============================================================ */
-const ManulifeQuestionnaire = ({ data, update }) => {
+const ManulifeQuestionnaire = ({ data, update, markManualNamePath = () => {} }) => {
   const d = data.segregatedFundInvestment.insuranceQuestionnaire.manulife;
   const set = (k, v) => update("segregatedFundInvestment", {
     ...data.segregatedFundInvestment,
@@ -1356,8 +1501,8 @@ const ManulifeQuestionnaire = ({ data, update }) => {
       <div className="section-header-light">Investor information</div>
       <div className="grid md:grid-cols-4 gap-3">
         <Field label="Salutation"><Select value={d.salutation} onChange={v=>set("salutation",v)} options={["Mr.","Mrs.","Miss","Ms.","Dr."]}/></Field>
-        <Field label="Surname"><TextInput value={d.surname} onChange={v=>set("surname",v)}/></Field>
-        <Field label="First name"><TextInput value={d.firstName} onChange={v=>set("firstName",v)}/></Field>
+        <Field label="Surname"><TextInput value={d.surname} onChange={v=>{ markManualNamePath("segregatedFundInvestment.insuranceQuestionnaire.manulife.surname"); set("surname",v); }}/></Field>
+        <Field label="First name"><TextInput value={d.firstName} onChange={v=>{ markManualNamePath("segregatedFundInvestment.insuranceQuestionnaire.manulife.firstName"); set("firstName",v); }}/></Field>
         <Field label="Initials"><TextInput value={d.initials} onChange={v=>set("initials",v)}/></Field>
         <Field label="Date completed"><TextInput type="date" value={d.dateCompleted} onChange={v=>set("dateCompleted",v)}/></Field>
       </div>
@@ -1432,7 +1577,7 @@ const ManulifeQuestionnaire = ({ data, update }) => {
 /* ============================================================
    QUESTIONNAIRE: iA FINANCIAL
    ============================================================ */
-const IAFinancialQuestionnaire = ({ data, update }) => {
+const IAFinancialQuestionnaire = ({ data, update, markManualNamePath = () => {} }) => {
   const d = data.segregatedFundInvestment.insuranceQuestionnaire.iaFinancial;
   const set = (k,v) => update("segregatedFundInvestment", {
     ...data.segregatedFundInvestment,
@@ -1511,7 +1656,7 @@ const IAFinancialQuestionnaire = ({ data, update }) => {
 
       <div className="section-header-light">Information</div>
       <div className="grid md:grid-cols-2 gap-3">
-        <Field label="Last and first name"><TextInput value={d.lastFirstName} onChange={v=>set("lastFirstName",v)}/></Field>
+        <Field label="Last and first name"><TextInput value={d.lastFirstName} onChange={v=>{ markManualNamePath("segregatedFundInvestment.insuranceQuestionnaire.iaFinancial.lastFirstName"); set("lastFirstName",v); }}/></Field>
         <Field label="Date of birth"><TextInput type="date" value={d.dateOfBirth} onChange={v=>set("dateOfBirth",v)}/></Field>
         <Field label="Profession"><TextInput value={d.profession} onChange={v=>set("profession",v)}/></Field>
         <Field label="Employer"><TextInput value={d.employer} onChange={v=>set("employer",v)}/></Field>
@@ -1579,7 +1724,7 @@ const IAFinancialQuestionnaire = ({ data, update }) => {
 /* ============================================================
    QUESTIONNAIRE: CANADA LIFE
    ============================================================ */
-const CanadaLifeQuestionnaire = ({ data, update }) => {
+const CanadaLifeQuestionnaire = ({ data, update, markManualNamePath = () => {} }) => {
   const d = data.segregatedFundInvestment.insuranceQuestionnaire.canadaLife;
   const set = (k,v) => update("segregatedFundInvestment", {
     ...data.segregatedFundInvestment,
@@ -1685,7 +1830,7 @@ const CanadaLifeQuestionnaire = ({ data, update }) => {
       </div>
 
       <div className="grid md:grid-cols-2 gap-3">
-        <Field label="Name" required><TextInput value={d.name} onChange={v=>set("name",v)}/></Field>
+        <Field label="Name" required><TextInput value={d.name} onChange={v=>{ markManualNamePath("segregatedFundInvestment.insuranceQuestionnaire.canadaLife.name"); set("name",v); }}/></Field>
         <Field label="Date" required><TextInput type="date" value={d.date} onChange={v=>set("date",v)}/></Field>
       </div>
     </div>
@@ -1695,7 +1840,7 @@ const CanadaLifeQuestionnaire = ({ data, update }) => {
 /* ============================================================
    QUESTIONNAIRE: EQUITABLE LIFE
    ============================================================ */
-const EquitableLifeQuestionnaire = ({ data, update }) => {
+const EquitableLifeQuestionnaire = ({ data, update, markManualNamePath = () => {} }) => {
   const d = data.segregatedFundInvestment.insuranceQuestionnaire.equitableLife;
   const set = (k,v) => update("segregatedFundInvestment", {
     ...data.segregatedFundInvestment,
@@ -1788,7 +1933,7 @@ const EquitableLifeQuestionnaire = ({ data, update }) => {
 
       <div className="grid md:grid-cols-2 gap-4">
         <div className="border rounded p-3">
-          <Field label="Client name" required><TextInput value={d.clientName} onChange={v=>set("clientName",v)}/></Field>
+          <Field label="Client name" required><TextInput value={d.clientName} onChange={v=>{ markManualNamePath("segregatedFundInvestment.insuranceQuestionnaire.equitableLife.clientName"); set("clientName",v); }}/></Field>
           <SignatureField value={d.clientSignature} onChange={v=>set("clientSignature",v)} label="Client signature"/>
           <Field label="Date"><TextInput type="date" value={d.clientDate} onChange={v=>set("clientDate",v)}/></Field>
         </div>
@@ -1804,24 +1949,40 @@ const EquitableLifeQuestionnaire = ({ data, update }) => {
 /* ============================================================
    STEP: LIFE INSURANCE NEEDS ANALYSIS
    ============================================================ */
-const LifeInsuranceNeedsAnalysisForm = ({ data, update }) => {
+const LifeInsuranceNeedsAnalysisForm = ({ data, update, markManualNamePath = () => {} }) => {
   const d = data.lifeInsurance.needsAnalysis;
   const set = (k,v) => update("lifeInsurance", { needsAnalysis: { ...d, [k]: v } });
   const setObj = (parent, k, v) => set(parent, { ...d[parent], [k]: v });
+  const investmentProperties = ensureRows(d.fixedAssets.investmentProperties, makeInvestmentPropertyRow);
+  const otherLiquidItems = ensureRows(d.liquidAssets.otherItems, makeOtherLiquidRow);
+  const updateInvestmentProperty = (i, k, v) => {
+    const rows = investmentProperties.map((row, idx) => idx === i ? { ...row, [k]: v } : row);
+    setObj("fixedAssets", "investmentProperties", rows);
+  };
+  const updateOtherLiquid = (i, k, v) => {
+    const rows = otherLiquidItems.map((row, idx) => idx === i ? { ...row, [k]: v } : row);
+    setObj("liquidAssets", "otherItems", rows);
+  };
+  const addInvestmentProperty = () => setObj("fixedAssets", "investmentProperties", [...investmentProperties, makeInvestmentPropertyRow()]);
+  const addOtherLiquid = () => setObj("liquidAssets", "otherItems", [...otherLiquidItems, makeOtherLiquidRow()]);
+  const removeInvestmentProperty = (i) => setObj("fixedAssets", "investmentProperties", investmentProperties.length > 1 ? investmentProperties.filter((_, idx) => idx !== i) : investmentProperties);
+  const removeOtherLiquid = (i) => setObj("liquidAssets", "otherItems", otherLiquidItems.length > 1 ? otherLiquidItems.filter((_, idx) => idx !== i) : otherLiquidItems);
 
   const num = (x) => Number(x || 0);
-  const fixedTotalMV = num(d.fixedAssets.principalMV) + num(d.fixedAssets.investMV);
-  const fixedTotalLoan = num(d.fixedAssets.principalLoan) + num(d.fixedAssets.investLoan);
+  const investmentPropertiesMV = investmentProperties.reduce((s,r) => s + num(r.marketValue), 0);
+  const investmentPropertiesLoan = investmentProperties.reduce((s,r) => s + num(r.loan), 0);
+  const fixedTotalMV = num(d.fixedAssets.principalMV) + investmentPropertiesMV;
+  const fixedTotalLoan = num(d.fixedAssets.principalLoan) + investmentPropertiesLoan;
   const fixedTotalNet = fixedTotalMV - fixedTotalLoan;
   const principalNet = num(d.fixedAssets.principalMV) - num(d.fixedAssets.principalLoan);
-  const investNet = num(d.fixedAssets.investMV) - num(d.fixedAssets.investLoan);
 
   const liqRegNet = num(d.liquidAssets.regMV) - num(d.liquidAssets.regLoan);
   const liqNonRegNet = num(d.liquidAssets.nonRegMV) - num(d.liquidAssets.nonRegLoan);
   const liqBankNet = num(d.liquidAssets.bankMV) - num(d.liquidAssets.bankLoan);
-  const liqOtherNet = num(d.liquidAssets.otherMV) - num(d.liquidAssets.otherLoan);
-  const liqTotalMV = num(d.liquidAssets.regMV) + num(d.liquidAssets.nonRegMV) + num(d.liquidAssets.bankMV) + num(d.liquidAssets.otherMV);
-  const liqTotalLoan = num(d.liquidAssets.regLoan) + num(d.liquidAssets.nonRegLoan) + num(d.liquidAssets.bankLoan) + num(d.liquidAssets.otherLoan);
+  const otherLiquidMV = otherLiquidItems.reduce((s,r) => s + num(r.marketValue), 0);
+  const otherLiquidLoan = otherLiquidItems.reduce((s,r) => s + num(r.loan), 0);
+  const liqTotalMV = num(d.liquidAssets.regMV) + num(d.liquidAssets.nonRegMV) + num(d.liquidAssets.bankMV) + otherLiquidMV;
+  const liqTotalLoan = num(d.liquidAssets.regLoan) + num(d.liquidAssets.nonRegLoan) + num(d.liquidAssets.bankLoan) + otherLiquidLoan;
   const liqTotalNet = liqTotalMV - liqTotalLoan;
 
   const businessNet = num(d.businessAssets.fmv);
@@ -1844,7 +2005,7 @@ const LifeInsuranceNeedsAnalysisForm = ({ data, update }) => {
       <table className="kyc-table">
         <tbody>
           <tr>
-            <th>Client's Name</th><td><TextInput value={d.clientName} onChange={v=>set("clientName",v)}/></td>
+            <th>Client's Name</th><td><TextInput value={d.clientName} onChange={v=>{ markManualNamePath("lifeInsurance.needsAnalysis.clientName"); set("clientName",v); }}/></td>
             <th>Occupation</th><td><TextInput value={d.occupation} onChange={v=>set("occupation",v)}/></td>
           </tr>
           <tr>
@@ -1859,43 +2020,55 @@ const LifeInsuranceNeedsAnalysisForm = ({ data, update }) => {
 
       <div className="section-header-light">Canadian Fixed Assets</div>
       <table className="kyc-table">
-        <thead><tr><th>Asset</th><th>Market Value</th><th>Mortgage &amp; LOC</th><th>Net Worth</th></tr></thead>
+        <thead><tr><th>Asset</th><th>Market Value</th><th>Mortgage &amp; LOC</th><th>Net Worth</th><th></th></tr></thead>
         <tbody>
           <tr><td>Principal Residence</td>
             <td><TextInput type="number" value={d.fixedAssets.principalMV} onChange={v=>setObj("fixedAssets","principalMV",v)}/></td>
             <td><TextInput type="number" value={d.fixedAssets.principalLoan} onChange={v=>setObj("fixedAssets","principalLoan",v)}/></td>
-            <td className="text-right font-semibold">{principalNet.toLocaleString()}</td></tr>
-          <tr><td>Investment Properties</td>
-            <td><TextInput type="number" value={d.fixedAssets.investMV} onChange={v=>setObj("fixedAssets","investMV",v)}/></td>
-            <td><TextInput type="number" value={d.fixedAssets.investLoan} onChange={v=>setObj("fixedAssets","investLoan",v)}/></td>
-            <td className="text-right font-semibold">{investNet.toLocaleString()}</td></tr>
-          <tr><th>Total Fixed Assets</th><th className="text-right">{fixedTotalMV.toLocaleString()}</th><th className="text-right">{fixedTotalLoan.toLocaleString()}</th><th className="text-right">{fixedTotalNet.toLocaleString()}</th></tr>
+            <td className="text-right font-semibold">{principalNet.toLocaleString()}</td><td></td></tr>
+          {investmentProperties.map((row, i) => (
+            <tr key={row.id || i}>
+              <td><TextInput value={row.name} onChange={v=>updateInvestmentProperty(i, "name", v)} placeholder="Investment Property"/></td>
+              <td><TextInput type="number" value={row.marketValue} onChange={v=>updateInvestmentProperty(i, "marketValue", v)}/></td>
+              <td><TextInput type="number" value={row.loan} onChange={v=>updateInvestmentProperty(i, "loan", v)}/></td>
+              <td className="text-right font-semibold">{(num(row.marketValue) - num(row.loan)).toLocaleString()}</td>
+              <td><button type="button" className="px-2 py-1 border rounded text-xs text-gray-600" onClick={() => removeInvestmentProperty(i)} disabled={investmentProperties.length <= 1}>Remove</button></td>
+            </tr>
+          ))}
+          <tr><th>Total Fixed Assets</th><th className="text-right">{fixedTotalMV.toLocaleString()}</th><th className="text-right">{fixedTotalLoan.toLocaleString()}</th><th className="text-right">{fixedTotalNet.toLocaleString()}</th><th></th></tr>
         </tbody>
       </table>
+      <button type="button" onClick={addInvestmentProperty} className="px-3 py-2 border border-[#C9A961] text-[#0B1E3F] rounded text-sm font-medium">+ Add Investment Property</button>
 
       <div className="section-header-light">Canadian Liquid Assets</div>
       <table className="kyc-table">
-        <thead><tr><th>Asset</th><th>Market Value</th><th>Loan</th><th>Net Worth</th></tr></thead>
+        <thead><tr><th>Asset</th><th>Market Value</th><th>Loan</th><th>Net Worth</th><th></th></tr></thead>
         <tbody>
           <tr><td>Registered plan (RRSP, TFSA, etc.)</td>
             <td><TextInput type="number" value={d.liquidAssets.regMV} onChange={v=>setObj("liquidAssets","regMV",v)}/></td>
             <td><TextInput type="number" value={d.liquidAssets.regLoan} onChange={v=>setObj("liquidAssets","regLoan",v)}/></td>
-            <td className="text-right font-semibold">{liqRegNet.toLocaleString()}</td></tr>
+            <td className="text-right font-semibold">{liqRegNet.toLocaleString()}</td><td></td></tr>
           <tr><td>Non-registered investment</td>
             <td><TextInput type="number" value={d.liquidAssets.nonRegMV} onChange={v=>setObj("liquidAssets","nonRegMV",v)}/></td>
             <td><TextInput type="number" value={d.liquidAssets.nonRegLoan} onChange={v=>setObj("liquidAssets","nonRegLoan",v)}/></td>
-            <td className="text-right font-semibold">{liqNonRegNet.toLocaleString()}</td></tr>
+            <td className="text-right font-semibold">{liqNonRegNet.toLocaleString()}</td><td></td></tr>
           <tr><td>Bank savings</td>
             <td><TextInput type="number" value={d.liquidAssets.bankMV} onChange={v=>setObj("liquidAssets","bankMV",v)}/></td>
             <td><TextInput type="number" value={d.liquidAssets.bankLoan} onChange={v=>setObj("liquidAssets","bankLoan",v)}/></td>
-            <td className="text-right font-semibold">{liqBankNet.toLocaleString()}</td></tr>
-          <tr><td>Other liquid Assets</td>
-            <td><TextInput type="number" value={d.liquidAssets.otherMV} onChange={v=>setObj("liquidAssets","otherMV",v)}/></td>
-            <td><TextInput type="number" value={d.liquidAssets.otherLoan} onChange={v=>setObj("liquidAssets","otherLoan",v)}/></td>
-            <td className="text-right font-semibold">{liqOtherNet.toLocaleString()}</td></tr>
-          <tr><th>Total Liquid Assets</th><th className="text-right">{liqTotalMV.toLocaleString()}</th><th className="text-right">{liqTotalLoan.toLocaleString()}</th><th className="text-right">{liqTotalNet.toLocaleString()}</th></tr>
+            <td className="text-right font-semibold">{liqBankNet.toLocaleString()}</td><td></td></tr>
+          {otherLiquidItems.map((row, i) => (
+            <tr key={row.id || i}>
+              <td><TextInput value={row.name} onChange={v=>updateOtherLiquid(i, "name", v)} placeholder="Other Liquid Asset"/></td>
+              <td><TextInput type="number" value={row.marketValue} onChange={v=>updateOtherLiquid(i, "marketValue", v)}/></td>
+              <td><TextInput type="number" value={row.loan} onChange={v=>updateOtherLiquid(i, "loan", v)}/></td>
+              <td className="text-right font-semibold">{(num(row.marketValue) - num(row.loan)).toLocaleString()}</td>
+              <td><button type="button" className="px-2 py-1 border rounded text-xs text-gray-600" onClick={() => removeOtherLiquid(i)} disabled={otherLiquidItems.length <= 1}>Remove</button></td>
+            </tr>
+          ))}
+          <tr><th>Total Liquid Assets</th><th className="text-right">{liqTotalMV.toLocaleString()}</th><th className="text-right">{liqTotalLoan.toLocaleString()}</th><th className="text-right">{liqTotalNet.toLocaleString()}</th><th></th></tr>
         </tbody>
       </table>
+      <button type="button" onClick={addOtherLiquid} className="px-3 py-2 border border-[#C9A961] text-[#0B1E3F] rounded text-sm font-medium">+ Add Other Liquid Asset</button>
 
       <div className="section-header-light">Business Assets</div>
       <table className="kyc-table">
@@ -2009,7 +2182,7 @@ const LifeInsuranceNeedsAnalysisForm = ({ data, update }) => {
 
       <div className="grid md:grid-cols-3 gap-4 pt-3 border-t">
         <div className="border rounded p-3">
-          <Field label="Policy Owner Name"><TextInput value={d.policyOwnerName} onChange={v=>set("policyOwnerName",v)}/></Field>
+          <Field label="Policy Owner Name"><TextInput value={d.policyOwnerName} onChange={v=>{ markManualNamePath("lifeInsurance.needsAnalysis.policyOwnerName"); set("policyOwnerName",v); }}/></Field>
           <SignatureField value={d.policyOwnerSignature} onChange={v=>set("policyOwnerSignature",v)} label="Policy Owner Signature"/>
         </div>
         <div className="border rounded p-3">
@@ -2405,8 +2578,7 @@ const LeverageKycPdf = ({ lc }) => (
           ["Employment Joint Applicant", fmtMoney(lc.income.empJoint), fmtMoney(lc.incomeMonthly.empJoint)],
           ["Investment", fmtMoney(lc.income.investment), fmtMoney(lc.incomeMonthly.investment)],
           ["Rental", fmtMoney(lc.income.rental), fmtMoney(lc.incomeMonthly.rental)],
-          [lc.income.other1Label || "Other", fmtMoney(lc.income.other1), fmtMoney(lc.incomeMonthly.other1)],
-          [lc.income.other2Label || "Other", fmtMoney(lc.income.other2), fmtMoney(lc.incomeMonthly.other2)],
+          ...ensureRows(lc.income.otherItems, makeIncomeOtherRow).map(row => [row.label || "Other", fmtMoney(row.annual), fmtMoney(row.monthly)]),
           [<b>Total</b>, <b>{fmtMoney(lc.income.totalAnnual)}</b>, <b>{fmtMoney(lc.income.totalMonthly)}</b>],
         ]}/>
       </PdfSection>
@@ -2419,9 +2591,7 @@ const LeverageKycPdf = ({ lc }) => (
           ["Registered Investments (less loans against securities)", fmtMoney(lc.netWorth.regClient), fmtMoney(lc.netWorth.regJoint)],
           ["Non-Registered Investments (cash & securities less loans)", fmtMoney(lc.netWorth.nonRegClient), fmtMoney(lc.netWorth.nonRegJoint)],
           ["Fixed Assets", fmtMoney(lc.netWorth.fixedClient), fmtMoney(lc.netWorth.fixedJoint)],
-          [lc.netWorth.otherLabel  || "Other", fmtMoney(lc.netWorth.otherClient),  fmtMoney(lc.netWorth.otherJoint)],
-          [lc.netWorth.other2Label || "Other", fmtMoney(lc.netWorth.other2Client), fmtMoney(lc.netWorth.other2Joint)],
-          [lc.netWorth.other3Label || "Other", fmtMoney(lc.netWorth.other3Client), fmtMoney(lc.netWorth.other3Joint)],
+          ...ensureRows(lc.netWorth.otherItems, makeNetWorthOtherRow).map(row => [row.label || "Other", fmtMoney(row.client), fmtMoney(row.joint)]),
           [<b>Total Net Worth</b>, <b style={{gridColumn:"span 2"}}>{fmtMoney(lc.netWorth.total)}</b>, ""],
         ]}/>
       </PdfSection>
@@ -2711,8 +2881,14 @@ const EquitableQpdf = ({ q }) => (
 /* --------- Life Insurance Needs Analysis --------- */
 const LifeInsurancePdf = ({ li }) => {
   const num = (x) => Number(x || 0);
-  const fixedTotalNet = (num(li.fixedAssets.principalMV)+num(li.fixedAssets.investMV)) - (num(li.fixedAssets.principalLoan)+num(li.fixedAssets.investLoan));
-  const liqTotalNet = (num(li.liquidAssets.regMV)+num(li.liquidAssets.nonRegMV)+num(li.liquidAssets.bankMV)+num(li.liquidAssets.otherMV)) - (num(li.liquidAssets.regLoan)+num(li.liquidAssets.nonRegLoan)+num(li.liquidAssets.bankLoan)+num(li.liquidAssets.otherLoan));
+  const investmentProperties = ensureRows(li.fixedAssets.investmentProperties, makeInvestmentPropertyRow);
+  const otherLiquidItems = ensureRows(li.liquidAssets.otherItems, makeOtherLiquidRow);
+  const investmentPropertiesMV = investmentProperties.reduce((s,r) => s + num(r.marketValue), 0);
+  const investmentPropertiesLoan = investmentProperties.reduce((s,r) => s + num(r.loan), 0);
+  const otherLiquidMV = otherLiquidItems.reduce((s,r) => s + num(r.marketValue), 0);
+  const otherLiquidLoan = otherLiquidItems.reduce((s,r) => s + num(r.loan), 0);
+  const fixedTotalNet = (num(li.fixedAssets.principalMV)+investmentPropertiesMV) - (num(li.fixedAssets.principalLoan)+investmentPropertiesLoan);
+  const liqTotalNet = (num(li.liquidAssets.regMV)+num(li.liquidAssets.nonRegMV)+num(li.liquidAssets.bankMV)+otherLiquidMV) - (num(li.liquidAssets.regLoan)+num(li.liquidAssets.nonRegLoan)+num(li.liquidAssets.bankLoan)+otherLiquidLoan);
   const totalNetWorth = fixedTotalNet + liqTotalNet + num(li.businessAssets.fmv) + num(li.foreignAssets.withProofValue) + num(li.foreignAssets.withoutProofValue);
   const earned = num(li.earnedIncome);
   const maxCI = earned * num(li.ciIncomeMultiple) + num(li.ciMortgage);
@@ -2737,7 +2913,7 @@ const LifeInsurancePdf = ({ li }) => {
         <PdfSection title="Canadian Fixed Assets">
           <PdfTable headers={["Asset","Market Value","Mortgage & LOC","Net Worth"]} rows={[
             ["Principal Residence", fmtMoney(li.fixedAssets.principalMV), fmtMoney(li.fixedAssets.principalLoan), fmtMoney(num(li.fixedAssets.principalMV)-num(li.fixedAssets.principalLoan))],
-            ["Investment Properties", fmtMoney(li.fixedAssets.investMV), fmtMoney(li.fixedAssets.investLoan), fmtMoney(num(li.fixedAssets.investMV)-num(li.fixedAssets.investLoan))],
+            ...investmentProperties.map(row => [row.name || "Investment Property", fmtMoney(row.marketValue), fmtMoney(row.loan), fmtMoney(num(row.marketValue)-num(row.loan))]),
           ]}/>
         </PdfSection>
         <PdfSection title="Canadian Liquid Assets">
@@ -2745,7 +2921,7 @@ const LifeInsurancePdf = ({ li }) => {
             ["Registered plan (RRSP, TFSA, etc.)", fmtMoney(li.liquidAssets.regMV), fmtMoney(li.liquidAssets.regLoan), fmtMoney(num(li.liquidAssets.regMV)-num(li.liquidAssets.regLoan))],
             ["Non-registered investment", fmtMoney(li.liquidAssets.nonRegMV), fmtMoney(li.liquidAssets.nonRegLoan), fmtMoney(num(li.liquidAssets.nonRegMV)-num(li.liquidAssets.nonRegLoan))],
             ["Bank savings", fmtMoney(li.liquidAssets.bankMV), fmtMoney(li.liquidAssets.bankLoan), fmtMoney(num(li.liquidAssets.bankMV)-num(li.liquidAssets.bankLoan))],
-            ["Other Liquid Assets", fmtMoney(li.liquidAssets.otherMV), fmtMoney(li.liquidAssets.otherLoan), fmtMoney(num(li.liquidAssets.otherMV)-num(li.liquidAssets.otherLoan))],
+            ...otherLiquidItems.map(row => [row.name || "Other Liquid Asset", fmtMoney(row.marketValue), fmtMoney(row.loan), fmtMoney(num(row.marketValue)-num(row.loan))]),
           ]}/>
         </PdfSection>
       </PdfPage>
@@ -3082,6 +3258,16 @@ const ReviewAndGeneratePDF = ({ data, goToStep }) => {
   const isLifeIns = data.businessType === "Life Insurance";
   const money = (v) => v ? `$${Number(v).toLocaleString()}` : " - ";
   const liEarned = Number(li.earnedIncome || 0);
+  const liInvestmentProperties = ensureRows(li.fixedAssets.investmentProperties, makeInvestmentPropertyRow);
+  const liOtherLiquidItems = ensureRows(li.liquidAssets.otherItems, makeOtherLiquidRow);
+  const liFixedNet = (Number(li.fixedAssets.principalMV || 0) + liInvestmentProperties.reduce((s,r) => s + Number(r.marketValue || 0), 0))
+    - (Number(li.fixedAssets.principalLoan || 0) + liInvestmentProperties.reduce((s,r) => s + Number(r.loan || 0), 0));
+  const liLiquidNet = (
+    Number(li.liquidAssets.regMV || 0) + Number(li.liquidAssets.nonRegMV || 0) + Number(li.liquidAssets.bankMV || 0) + liOtherLiquidItems.reduce((s,r) => s + Number(r.marketValue || 0), 0)
+  ) - (
+    Number(li.liquidAssets.regLoan || 0) + Number(li.liquidAssets.nonRegLoan || 0) + Number(li.liquidAssets.bankLoan || 0) + liOtherLiquidItems.reduce((s,r) => s + Number(r.loan || 0), 0)
+  );
+  const liTotalNetWorth = liFixedNet + liLiquidNet + Number(li.businessAssets.fmv || 0) + Number(li.foreignAssets.withProofValue || 0) + Number(li.foreignAssets.withoutProofValue || 0);
   const liMaxCI = liEarned * Number(li.ciIncomeMultiple || 0) + Number(li.ciMortgage || 0);
   const liMaxLife = liEarned * Number(li.lifeIncomeMultiple || 0) + Number(li.lifeMortgage || 0);
 
@@ -3200,8 +3386,11 @@ const ReviewAndGeneratePDF = ({ data, goToStep }) => {
                 <ReviewSummaryRow label="Earned income" value={money(li.earnedIncome)}/>
                 <ReviewSummaryRow label="Unearned income" value={money(li.unearnedIncome)}/>
                 <ReviewSummaryRow label="Spouse income" value={money(li.spouseIncome)}/>
+                <ReviewSummaryRow label="Fixed assets net worth" value={money(liFixedNet)}/>
+                <ReviewSummaryRow label="Liquid assets net worth" value={money(liLiquidNet)}/>
               </div>
               <div>
+                <ReviewSummaryRow label="Total Net Worth" value={money(liTotalNetWorth)}/>
                 <ReviewSummaryRow label="CI income multiple" value={li.ciIncomeMultiple}/>
                 <ReviewSummaryRow label="Life income multiple" value={li.lifeIncomeMultiple}/>
                 <ReviewSummaryRow label="In-force CI coverage" value={money(li.inForceCI)}/>
@@ -3526,6 +3715,67 @@ const App = () => {
     ));
   }, [activeDraftId]);
 
+  const markManualNamePath = useCallback((path) => {
+    setDrafts(ds => ds.map(d => {
+      if (d.id !== activeDraftId) return d;
+      const smartFill = d.formData.smartFill || { manual: {} };
+      return {
+        ...d,
+        formData: {
+          ...d.formData,
+          smartFill: {
+            ...smartFill,
+            manual: { ...(smartFill.manual || {}), [path]: true },
+          },
+        },
+        updatedAt: Date.now(),
+      };
+    }));
+  }, [activeDraftId]);
+
+  useEffect(() => {
+    if (!formData) return;
+    const ad = formData.advisorDisclosure || {};
+    const primaryName = fullClientName(ad);
+    const spouseName = (ad.client2Name || "").trim();
+    const smartFill = formData.smartFill || { manual: {} };
+    const manual = smartFill.manual || {};
+    const lastPrimaryName = smartFill.lastPrimaryName || "";
+    const lastSpouseName = smartFill.lastSpouseName || "";
+    const targets = getSmartNameTargets(formData, primaryName, spouseName);
+    const previousTargetValues = Object.fromEntries(getSmartNameTargets(
+      { advisorDisclosure: { clientName: lastPrimaryName, client1Name: lastPrimaryName, client2Name: lastSpouseName } },
+      lastPrimaryName,
+      lastSpouseName
+    ));
+
+    let nextFormData = formData;
+    let changed = false;
+    targets.forEach(([path, value]) => {
+      if (!value || manual[path]) return;
+      const current = getPath(nextFormData, path) || "";
+      const previousAuto = previousTargetValues[path] || "";
+      if (!current || current === previousAuto) {
+        nextFormData = setPathImmutable(nextFormData, path, value);
+        changed = true;
+      }
+    });
+
+    if (primaryName !== lastPrimaryName || spouseName !== lastSpouseName) {
+      nextFormData = {
+        ...nextFormData,
+        smartFill: { ...smartFill, manual, lastPrimaryName: primaryName, lastSpouseName: spouseName },
+      };
+      changed = true;
+    }
+    if (changed) updateActiveDraft({ formData: nextFormData });
+  }, [
+    formData?.advisorDisclosure?.clientName,
+    formData?.advisorDisclosure?.client1Name,
+    formData?.advisorDisclosure?.client2Name,
+    activeDraftId,
+  ]);
+
   const setCurrentStepIdx = useCallback((idx) => {
     updateActiveDraft({ currentStep: idx });
   }, [updateActiveDraft]);
@@ -3603,14 +3853,14 @@ const App = () => {
       case "advisorDisclosure": return <AdvisorDisclosureForm data={formData} update={update}/>;
       case "businessType":      return <BusinessTypeSelection data={formData} update={update}/>;
       case "leverageSelection": return <LeverageLoanSelection data={formData} update={update}/>;
-      case "leverageCompliance":return <LeverageComplianceForm data={formData} update={update}/>;
-      case "nonLeverageCompliance": return <NonLeverageComplianceForm data={formData} update={update}/>;
+      case "leverageCompliance":return <LeverageComplianceForm data={formData} update={update} markManualNamePath={markManualNamePath}/>;
+      case "nonLeverageCompliance": return <NonLeverageComplianceForm data={formData} update={update} markManualNamePath={markManualNamePath}/>;
       case "insuranceSelection":return <InsuranceCompanySelection data={formData} update={update}/>;
-      case "manulife":          return <ManulifeQuestionnaire data={formData} update={update}/>;
-      case "iaFinancial":       return <IAFinancialQuestionnaire data={formData} update={update}/>;
-      case "canadaLife":        return <CanadaLifeQuestionnaire data={formData} update={update}/>;
-      case "equitableLife":     return <EquitableLifeQuestionnaire data={formData} update={update}/>;
-      case "needsAnalysis":     return <LifeInsuranceNeedsAnalysisForm data={formData} update={update}/>;
+      case "manulife":          return <ManulifeQuestionnaire data={formData} update={update} markManualNamePath={markManualNamePath}/>;
+      case "iaFinancial":       return <IAFinancialQuestionnaire data={formData} update={update} markManualNamePath={markManualNamePath}/>;
+      case "canadaLife":        return <CanadaLifeQuestionnaire data={formData} update={update} markManualNamePath={markManualNamePath}/>;
+      case "equitableLife":     return <EquitableLifeQuestionnaire data={formData} update={update} markManualNamePath={markManualNamePath}/>;
+      case "needsAnalysis":     return <LifeInsuranceNeedsAnalysisForm data={formData} update={update} markManualNamePath={markManualNamePath}/>;
       case "review":            return <ReviewAndGeneratePDF data={formData} goToStep={goToStepByKey}/>;
       default:                  return <div className="text-center text-gray-500 py-10">Loading...</div>;
     }
