@@ -3648,6 +3648,21 @@ const reasonWhyHasAttachment = (reasonWhy) => {
   const attachment = makeReasonWhy(reasonWhy).attachment;
   return (attachment.kind === "pdf" && !!attachment.dataUrl) || (attachment.kind === "docx" && hasText(attachment.text));
 };
+const effectiveReasonWhyData = (data) => {
+  if (data?.businessType !== "Segregated Fund Investment") return data;
+  const sf = data.segregatedFundInvestment || {};
+  const rw = makeReasonWhy(sf.reasonWhy);
+  if (rw.include === false || reasonWhyHasAttachment(rw) || !rw.accountType || hasText(rw.body)) return data;
+  const effectiveData = deepClone(data);
+  const effectiveReasonWhy = {
+    ...rw,
+    body: generateReasonWhyBody(effectiveData),
+    generatedAccountType: rw.accountType,
+  };
+  effectiveData.segregatedFundInvestment.reasonWhy = effectiveReasonWhy;
+  effectiveReasonWhy.sourceSnapshot = reasonWhySourceSnapshot(effectiveData);
+  return effectiveData;
+};
 const mergePdfAttachment = async (jsPdf, attachment) => {
   if (attachment?.kind !== "pdf" || !attachment.dataUrl) return jsPdf.output("blob");
   if (!window.PDFLib?.PDFDocument) throw new Error("PDF attachment support failed to load. Please refresh and try again.");
@@ -3688,14 +3703,11 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
 
   // Builds a multi-page PDF by rasterising each .pdf-page element separately.
   const buildPdf = async () => {
-    if (data.businessType === "Segregated Fund Investment") {
-      const rw = makeReasonWhy(data.segregatedFundInvestment.reasonWhy);
+    if (effectivePdfData.businessType === "Segregated Fund Investment") {
+      const rw = makeReasonWhy(effectivePdfData.segregatedFundInvestment.reasonWhy);
       const hasReasonWhyAttachment = reasonWhyHasAttachment(rw);
       if (rw.include !== false && !hasReasonWhyAttachment && !rw.accountType) {
         throw new Error("Please select a Reason Why Letter account type before downloading the PDF.");
-      }
-      if (rw.include !== false && !hasReasonWhyAttachment && rw.accountType && !hasText(rw.body)) {
-        throw new Error("Please generate the Reason Why Letter preview before downloading the PDF.");
       }
     }
     const { jsPDF } = window.jspdf;
@@ -3732,7 +3744,7 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
     setGenerating(true);
     try {
       const pdf = await buildPdf();
-      const reasonWhyForExport = makeReasonWhy(data.segregatedFundInvestment?.reasonWhy);
+      const reasonWhyForExport = makeReasonWhy(effectivePdfData.segregatedFundInvestment?.reasonWhy);
       const finalBlob = await mergePdfAttachment(pdf, reasonWhyForExport.attachment);
       const clientName = data.advisorDisclosure.client1Name || data.advisorDisclosure.clientName || "client";
       const safeName = clientName.replace(/[^a-z0-9]/gi, "_");
@@ -3748,13 +3760,14 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
 
   const getPdfBlob = async () => {
     const pdf = await buildPdf();
-    const reasonWhyForExport = makeReasonWhy(data.segregatedFundInvestment?.reasonWhy);
+    const reasonWhyForExport = makeReasonWhy(effectivePdfData.segregatedFundInvestment?.reasonWhy);
     return mergePdfAttachment(pdf, reasonWhyForExport.attachment);
   };
   const ad = data.advisorDisclosure;
   const sf = data.segregatedFundInvestment;
   const reasonWhy = makeReasonWhy(sf.reasonWhy);
   const hasReasonWhyAttachment = reasonWhyHasAttachment(reasonWhy);
+  const effectivePdfData = effectiveReasonWhyData(data);
   const setReasonWhy = (patch) => update("segregatedFundInvestment", {
     ...sf,
     reasonWhy: { ...reasonWhy, ...patch },
@@ -3859,7 +3872,7 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
       {/* Hidden full-form PDF source; rendered off-screen so html2canvas can capture each page */}
       <div style={{ position: "absolute", left: -99999, top: 0, pointerEvents: "none" }} aria-hidden ref={printableRef}>
         <div className="pdf-content">
-          <PrintableDocument data={data}/>
+          <PrintableDocument data={effectivePdfData}/>
         </div>
       </div>
 
@@ -3963,6 +3976,9 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
               </div>
             ) : (
               <div className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-3">Select an account type to generate an editable Reason Why Letter preview.</div>
+            )}
+            {!hasReasonWhyAttachment && (
+              <div className="mt-2 text-xs text-gray-600">If no Reason Why file is attached, the template letter will be generated automatically when you export the PDF.</div>
             )}
             <div className="mt-4 rounded border border-gray-200 bg-gray-50 p-3">
               <div className="text-xs font-semibold text-navy mb-2">Attach Reason Why Word/PDF</div>
