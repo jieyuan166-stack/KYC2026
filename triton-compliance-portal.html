@@ -3725,6 +3725,20 @@ class PdfWriter {
     this.pdf.line(x, startY + h, x + width, startY + h);
     this.y = startY + h + 5;
   }
+  prominentField(label, value, width = this.contentW) {
+    this.ensure(18);
+    const x = this.x;
+    const startY = this.y;
+    this.setFont(9, "bold", PDF_VEC.navy);
+    this.pdf.text(cleanPdfText(label), x, startY);
+    const lines = this.textLines(value || " ", width, 11.4);
+    this.setFont(11.4, "bold", PDF_VEC.navy);
+    this.pdf.text(lines, x, startY + 6.2);
+    this.pdf.setDrawColor(PDF_VEC.gold);
+    this.pdf.setLineWidth(0.25);
+    this.pdf.line(x, startY + 6.2 + lines.length * 4.8 + 1.5, x + width, startY + 6.2 + lines.length * 4.8 + 1.5);
+    this.y = startY + 6.2 + lines.length * 4.8 + 7;
+  }
   fields(items, columns = 2) {
     const gap = 6;
     const width = (this.contentW - gap * (columns - 1)) / columns;
@@ -3825,22 +3839,23 @@ class PdfWriter {
   signature(name, role = "Client", width = 62) {
     const sigW = width;
     const dateW = 56;
-    this.ensure(28);
+    this.ensure(36);
     const x = this.x;
-    this.setFont(7.6, "bold", PDF_VEC.soft);
-    this.pdf.text(cleanPdfText(name || role), x, this.y);
-    this.setFont(7.4, "bold", PDF_VEC.navy);
-    this.pdf.text(`${role} Signature`, x, this.y + 6);
-    this.pdf.text("Date", x + sigW + 8, this.y + 6);
+    const topY = this.y + 5;
+    this.setFont(9.6, "bold", PDF_VEC.navy);
+    this.pdf.text(cleanPdfText(name || role), x, topY);
+    this.setFont(7.8, "bold", PDF_VEC.navy);
+    this.pdf.text(`${role} Signature`, x, topY + 7);
+    this.pdf.text("Date", x + sigW + 8, topY + 7);
     this.pdf.setFillColor(PDF_VEC.signatureBox);
     this.pdf.setDrawColor(PDF_VEC.gold);
-    this.pdf.rect(x, this.y + 8, sigW, 13, "FD");
+    this.pdf.rect(x, topY + 9.5, sigW, 13, "FD");
     this.pdf.setFillColor(PDF_VEC.dateBox);
     this.pdf.setDrawColor(PDF_VEC.gold);
-    this.pdf.rect(x + sigW + 8, this.y + 8, dateW, 13, "FD");
+    this.pdf.rect(x + sigW + 8, topY + 9.5, dateW, 13, "FD");
     this.pdf.setFillColor("#FFFFFF");
     this.pdf.setTextColor(PDF_VEC.text);
-    this.y += 26;
+    this.y += 34;
   }
   initials(label = "Client Initials") {
     this.ensure(14);
@@ -4016,7 +4031,22 @@ const questionnaireScore = (questions, data) => questions.reduce((sum, question)
 }, 0);
 const drawQuestionOptions = (w, questions, data) => questions.forEach(question => w.questionOptionBlock(question, data?.[question.key]));
 const drawProfileResult = (w, summaryRows, rangeRows, headers = ["Score range", "Profile"]) => {
-  w.fields(summaryRows, 2);
+  const gap = 8;
+  const colW = (w.contentW - gap) / 2;
+  w.ensure(20);
+  const y0 = w.y;
+  summaryRows.slice(0, 2).forEach((row, idx) => {
+    const x = w.x + idx * (colW + gap);
+    w.setFont(9.2, "bold", PDF_VEC.navy);
+    w.pdf.text(cleanPdfText(row[0]), x, y0);
+    const valueLines = w.textLines(row[1] || " - ", colW, 12.2);
+    w.setFont(12.2, "bold", PDF_VEC.navy);
+    w.pdf.text(valueLines, x, y0 + 7);
+  });
+  w.pdf.setDrawColor(PDF_VEC.gold);
+  w.pdf.setLineWidth(0.25);
+  w.pdf.line(w.x, y0 + 15.5, w.x + w.contentW, y0 + 15.5);
+  w.y = y0 + 21;
   w.table(headers, pdfRows(rangeRows), headers.length === 3 ? [34, 34, w.contentW - 68] : [w.contentW * 0.42, w.contentW * 0.58], {
     headerFill: "#F7F5EE",
     headerText: PDF_VEC.navy,
@@ -4128,7 +4158,7 @@ const drawInsuranceQuestionnaireVector = (w, sf) => {
     w.section("Investor Profile Questionnaire", () => drawQuestionOptions(w, equitableQuestions, e));
     w.section("Investor Profile Result", () => {
       drawProfileResult(w, [["Total Score", String(score)], ["Investor profile type", profile || " - "]], [["0-7", "Minimal Risk"], ["8-16", "Conservative"], ["17-25", "Moderate Conservative"], ["26-34", "Balanced"], ["35-42", "Growth"], ["43-50", "Aggressive Growth"]]);
-      w.field("Client Name", e.clientName, w.contentW);
+      w.prominentField("Client Name", e.clientName, w.contentW);
     });
     w.section("Signatures", () => { w.signature(e.clientName, "Client"); w.signature("Jie Yuan", "Advisor"); });
     w.finishPage();
