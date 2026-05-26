@@ -2740,13 +2740,14 @@ const SigPlaceholder = ({ kind = "signature", label, width }) => {
     kind === "initials" ? "Initials" :
     "Signature"
   );
-  const w = width || (kind === "initials" ? 70 : kind === "date" ? 130 : 210);
+  const w = kind === "initials" ? Math.min(width || 58, 58) : (width || (kind === "date" ? 130 : 210));
+  const h = kind === "initials" ? 30 : kind === "date" ? 30 : 42;
   return (
     <div style={{ display: "inline-block", verticalAlign: "bottom", marginRight: 14, marginBottom: 4 }}>
-      <div style={{ width: w, height: kind === "date" ? 24 : 30, border: "1px dashed " + GOLD, background: "#fff4cc", borderRadius: 4 }}/>
-      <div style={{ fontSize: PDF_TYPE.footer, color: TEXT_SOFT, letterSpacing: 0.6, textTransform: "uppercase", fontWeight: 650, marginTop: 3 }}>
+      <div style={{ fontSize: PDF_TYPE.footer, color: NAVY, letterSpacing: 0.45, textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>
         {defaultLabel}
       </div>
+      <div style={{ width: w, height: h, border: "1px solid " + GOLD, background: "#FFFFFF", borderRadius: 2 }}/>
     </div>
   );
 };
@@ -3858,13 +3859,19 @@ class PdfWriter {
     this.y += 34;
   }
   initials(label = "Client Initials") {
-    this.ensure(14);
-    this.pdf.setFillColor(PDF_VEC.highlight);
+    const boxW = 20;
+    const boxH = 11;
+    this.ensure(24);
+    const x = PDF_MM.w - this.margin - boxW;
+    const labelY = this.y + 4;
+    this.setFont(7.8, "bold", PDF_VEC.navy);
+    this.pdf.text(cleanPdfText(label), x, labelY);
+    this.pdf.setFillColor("#FFFFFF");
     this.pdf.setDrawColor(PDF_VEC.gold);
-    this.pdf.rect(PDF_MM.w - this.margin - 24, this.y - 4, 24, 10, "FD");
-    this.setFont(7, "bold", PDF_VEC.navy);
-    this.pdf.text(label, PDF_MM.w - this.margin - 22, this.y + 2);
-    this.y += 8;
+    this.pdf.rect(x, labelY + 3, boxW, boxH, "FD");
+    this.pdf.setFillColor("#FFFFFF");
+    this.pdf.setTextColor(PDF_VEC.text);
+    this.y = labelY + boxH + 9;
   }
   summary(label, value) {
     this.ensure(18);
@@ -4128,7 +4135,7 @@ const drawInsuranceQuestionnaireVector = (w, sf) => {
       if (ia.choiceMatchesProfile === "No") {
         w.check(ia.reasonReducedFunds, "I wish to benefit from certain coverages. I understand that the choice of funds offered to me will be reduced and I accept that my investments will differ from those suggested by my profile.");
         w.check(ia.reasonOther, `Other${ia.reasonOtherText ? ": " + ia.reasonOtherText : ""}`);
-        w.field("Client's initials", ia.clientInitials, 40);
+        w.initials("Client's initials");
       }
       w.textBlock("I have reviewed this investor profile, I recognize it is accurate and I confirm having received a copy of it.", { size: 8.8 });
     });
@@ -4230,6 +4237,165 @@ const drawReasonWhyVector = (w, data, fromAttachment = false) => {
   w.signature(ctx.clientName, "Client");
   w.finishPage();
 };
+const missingHasText = (value) => cleanPdfText(value).trim().length > 0;
+const addMissing = (items, section, label, value) => {
+  if (!missingHasText(value)) items.push({ section, label });
+};
+const addMissingChoiceGroup = (items, section, label, selected) => {
+  if (!selected) items.push({ section, label });
+};
+const checkedKeys = (obj = {}) => Object.keys(obj).filter(key => obj[key]);
+const questionnaireMissing = (items, section, questions, answers = {}) => {
+  questions.forEach(question => {
+    if (!missingHasText(answers[question.key])) items.push({ section, label: question.label });
+  });
+};
+const collectMissingItems = (data) => {
+  const items = [];
+  const ad = data.advisorDisclosure || {};
+  const businessType = data.businessType || "";
+  addMissing(items, "Advisor Disclosure", "Client 1 name", ad.client1Name || ad.clientName);
+  addMissing(items, "Advisor Disclosure", "Acknowledgement client name", ad.clientName || ad.client1Name);
+  if (ad.spouseConsent) addMissing(items, "Advisor Disclosure", "Client 2 name for joint client file consent", ad.client2Name);
+  addMissing(items, "Cover / Case Setup", "Business type", businessType);
+
+  const sf = data.segregatedFundInvestment || {};
+  if (businessType === "Segregated Fund Investment") {
+    addMissing(items, "Segregated Fund Investment", "Leverage selection", sf.leverageLoan);
+    addMissing(items, "Segregated Fund Investment", "Insurance company", sf.selectedInsuranceCompany);
+
+    if (sf.leverageLoan === "yes") {
+      const lc = sf.leverageCompliance || {};
+      [
+        ["Last Name of Client", lc.clientLast],
+        ["First Name of Client", lc.clientFirst],
+        ["Leveraging", lc.leveragingType],
+        ["Client Age", lc.clientAge],
+        ["Client Knowledge", lc.clientKnowledge],
+        ["Investment Objectives", lc.investmentObjectives],
+        ["Time Horizon", lc.timeHorizon],
+        ["Principal Loan Amount", lc.principalLoan],
+        ["Loan Start Date", lc.loanStartDate],
+        ["Payment Amount", lc.paymentAmount],
+        ["Payment Type", lc.paymentType],
+        ["Client acknowledgement name", lc.clientNameAck],
+        ["Advisor acknowledgement name", lc.advisorNameAck],
+      ].forEach(([label, value]) => addMissing(items, "Leverage KYC", label, value));
+      if (!missingHasText(lc.riskHigh) && !missingHasText(lc.riskMedium) && !missingHasText(lc.riskLow)) {
+        items.push({ section: "Leverage KYC", label: "Risk Tolerance - High / Medium / Low percentage" });
+      }
+      if (!missingHasText(lc.income?.empClient) && !missingHasText(lc.income?.investment) && !missingHasText(lc.income?.rental)) {
+        items.push({ section: "Leverage KYC", label: "Annual income from all sources" });
+      }
+      if (!missingHasText(lc.netWorth?.regClient) && !missingHasText(lc.netWorth?.nonRegClient) && !missingHasText(lc.netWorth?.fixedClient)) {
+        items.push({ section: "Leverage KYC", label: "Total net worth details" });
+      }
+      const debtRowsWithValues = (lc.debt || []).filter(row => missingHasText(row.lender) || missingHasText(row.balance) || missingHasText(row.monthly));
+      if (!debtRowsWithValues.length) items.push({ section: "Leverage KYC", label: "Debt table balances / monthly payments" });
+    }
+
+    if (sf.leverageLoan === "no") {
+      const nl = sf.nonLeverageCompliance || {};
+      [
+        ["Client name(s)", nl.clientNames],
+        ["Approximate annual income", nl.annualIncome],
+        ["Approximate net worth", nl.netWorth],
+        ["Investment knowledge", nl.investmentKnowledge],
+        ["Risk tolerance", nl.riskTolerance],
+        ["Amount to invest ($)", nl.amountToInvest],
+        ["Time horizon", nl.timeHorizon],
+        ["Risk profile", nl.riskProfile],
+        ["Funds recommended", nl.fundsRecommended],
+        ["Guarantees (maturity/death benefit)", nl.guarantee],
+        ["Support and rationale of fund selection / risk profile / fee structure", nl.rationale],
+      ].forEach(([label, value]) => addMissing(items, "Sales Suitability", label, value));
+      addMissingChoiceGroup(items, "Sales Suitability", "Need identification - reason(s) for selecting segregated funds", checkedKeys(nl.reasons).filter(k => k !== "otherText").length);
+      addMissingChoiceGroup(items, "Sales Suitability", "Purpose of investment", checkedKeys(nl.purpose).filter(k => k !== "otherText").length);
+      addMissingChoiceGroup(items, "Sales Suitability", "Fee structure", checkedKeys(nl.feeStructure).filter(k => k !== "otherText").length);
+    }
+
+    const q = sf.insuranceQuestionnaire || {};
+    if (sf.selectedInsuranceCompany === "Manulife") {
+      const m = q.manulife || {};
+      addMissing(items, "Manulife Questionnaire", "Surname", m.surname);
+      addMissing(items, "Manulife Questionnaire", "First Name", m.firstName);
+      addMissing(items, "Manulife Questionnaire", "Date Completed", m.dateCompleted);
+      questionnaireMissing(items, "Manulife Questionnaire", manulifeQuestions, m);
+    }
+    if (sf.selectedInsuranceCompany === "iA Financial") {
+      const ia = q.iaFinancial || {};
+      addMissing(items, "iA FINANCIAL Questionnaire", "Last and First Name", ia.lastFirstName);
+      addMissing(items, "iA FINANCIAL Questionnaire", "Date of Birth", ia.dateOfBirth);
+      addMissing(items, "iA FINANCIAL Questionnaire", "Financial Objectives", ia.financialObjectives);
+      questionnaireMissing(items, "iA FINANCIAL Questionnaire", iaQuestions, ia);
+      addMissing(items, "iA FINANCIAL Questionnaire", "Choice of investments", ia.choiceOfInvestments);
+      addMissing(items, "iA FINANCIAL Questionnaire", "Does your choice correspond to your investor profile?", ia.choiceMatchesProfile);
+      if (ia.choiceMatchesProfile === "No" && !ia.reasonReducedFunds && !ia.reasonOther) {
+        items.push({ section: "iA FINANCIAL Questionnaire", label: "Reason why selected investments do not reflect profile" });
+      }
+    }
+    if (sf.selectedInsuranceCompany === "Canada Life") {
+      const c = q.canadaLife || {};
+      addMissing(items, "Canada Life Questionnaire", "Name", c.name);
+      addMissing(items, "Canada Life Questionnaire", "Date", c.date);
+      questionnaireMissing(items, "Canada Life Questionnaire", canadaQuestions, c);
+    }
+    if (sf.selectedInsuranceCompany === "Equitable Life") {
+      const e = q.equitableLife || {};
+      addMissing(items, "Equitable Investor Profile Questionnaire", "Client Name", e.clientName);
+      questionnaireMissing(items, "Equitable Investor Profile Questionnaire", equitableQuestions, e);
+    }
+
+    const rw = makeReasonWhy(sf.reasonWhy);
+    if (rw.include !== false && !reasonWhyHasAttachment(rw)) {
+      addMissing(items, "Reason Why Letter", "Account type / template", rw.accountType);
+      addMissing(items, "Reason Why Letter", "Editable Reason Why body", rw.body);
+    }
+  }
+
+  if (businessType === "Life Insurance") {
+    const li = data.lifeInsurance?.needsAnalysis || {};
+    [
+      ["Client's Name", li.clientName],
+      ["Occupation", li.occupation],
+      ["Age", li.age],
+      ["Industry", li.industry],
+      ["Earned Income", li.earnedIncome],
+      ["Policy Owner Name", li.policyOwnerName],
+      ["Advisor Name", li.advisorName],
+      ["Annual Premium", li.annualPremium],
+    ].forEach(([label, value]) => addMissing(items, "Life Insurance Needs Analysis", label, value));
+    if (!missingHasText(li.newCoverageCI) && !missingHasText(li.newCoverageLife)) {
+      items.push({ section: "Life Insurance Needs Analysis", label: "New CI Coverage or New Life Coverage" });
+    }
+  }
+
+  return items;
+};
+const drawMissingItemsVector = (w, items) => {
+  w.addPage();
+  w.header("Missing Items / Fields To Review", "Review before client signature", "Final Review");
+  w.section("Fields To Review", () => {
+    if (!items.length) {
+      w.textBlock("No missing items identified based on the exported PDF data.", { size: 10, bold: true, lineH: 5.2 });
+      return;
+    }
+    w.textBlock("The following fields or questionnaire answers appear incomplete in the exported PDF data. Review these items before final signing.", { size: 9.2, lineH: 5.1, gap: 4 });
+    items.forEach((item, idx) => {
+      const label = cleanPdfText(item.label);
+      const section = cleanPdfText(item.section);
+      const lines = w.textLines(label, w.contentW - 9, 8.6);
+      const h = Math.max(8.5, lines.length * 4.1 + 5.5);
+      w.ensure(h + 1);
+      w.setFont(8.6, "bold", PDF_VEC.navy);
+      w.pdf.text(`${idx + 1}. ${section}`, w.x, w.y);
+      w.setFont(8.6, "normal", PDF_VEC.text);
+      w.pdf.text(lines, w.x + 8, w.y + 4.5);
+      w.y += h;
+    });
+  });
+  w.finishPage();
+};
 const buildVectorPdf = async (data) => {
   const { jsPDF } = window.jspdf;
   const pdf = new jsPDF("p", "mm", "letter");
@@ -4248,6 +4414,7 @@ const buildVectorPdf = async (data) => {
     if (!reasonWhyHasAttachment(rw) && rw.accountType && hasText(rw.body)) drawReasonWhyVector(w, data, false);
   }
   if (isLifeIns) drawLifeInsuranceVector(w, data.lifeInsurance.needsAnalysis || {});
+  drawMissingItemsVector(w, collectMissingItems(data));
   return pdf;
 };
 
