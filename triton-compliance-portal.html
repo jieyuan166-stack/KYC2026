@@ -3544,6 +3544,7 @@ class PdfWriter {
     this.y = this.margin;
     this.contentW = PDF_MM.w - this.margin * 2;
     this.footerEnabled = true;
+    this.currentHeader = null;
   }
   setFont(size = 10, style = "normal", color = PDF_VEC.text) {
     this.pdf.setFont(this.font, style);
@@ -3602,6 +3603,8 @@ class PdfWriter {
     this.addPage({ margin: opts.reason ? PDF_VEC.reasonMargin : PDF_VEC.margin });
     if (opts.reason) this.reasonHeader(opts.reasonTitle, opts.reasonSubtitle, true);
     else if (opts.continuedTitle) this.header(opts.continuedTitle, opts.continuedSubtitle, opts.pageLabel);
+    else if (this.currentHeader?.kind === "reason") this.reasonHeader(this.currentHeader.title, this.currentHeader.subtitle, true);
+    else if (this.currentHeader?.kind === "standard") this.header(this.currentHeader.title, this.currentHeader.subtitle, this.currentHeader.pageLabel);
   }
   textLines(text, width, size = 10) {
     this.pdf.setFontSize(size);
@@ -3640,8 +3643,8 @@ class PdfWriter {
     const date = new Date().toLocaleDateString("en-CA", { year: "numeric", month: "long", day: "numeric" });
     this.coverMeta("Client", client, 16, 242);
     this.coverMeta("Date Prepared", date, 112, 242);
-    this.coverMeta("Advisor", "Jie Yuan\nIndependent Advisor", 16, 258);
-    this.coverMeta("Firm", "Triton Wealth Management Corp.\nMGA: Citistar Financial Services Ltd.", 112, 258);
+    this.coverMeta("Advisor", "Jie Yuan", 16, 258);
+    this.coverMeta("Firm", "Triton Wealth Management Corp.", 112, 258);
     this.pdf.setDrawColor(PDF_VEC.gold);
     this.pdf.line(16, 273, 200, 273);
   }
@@ -3653,10 +3656,12 @@ class PdfWriter {
   }
   header(title, subtitle = "", pageLabel = "") {
     this.ensure(40);
+    this.currentHeader = { kind: "standard", title, subtitle, pageLabel };
     const topY = Math.max(16, this.y - 2);
     this.drawLogo(this.margin + 2, topY, 22, 22.2);
-    this.setFont(8.5, "bold", PDF_VEC.navy);
+    this.setFont(10, "bold", PDF_VEC.navy);
     this.pdf.text("Jie Yuan", PDF_MM.w - this.margin, topY + 4.5, { align: "right" });
+    this.setFont(7, "bold", PDF_VEC.navy);
     this.pdf.text("INDEPENDENT ADVISOR", PDF_MM.w - this.margin, topY + 9, { align: "right" });
     this.pdf.setDrawColor(PDF_VEC.gold);
     this.pdf.setLineWidth(0.35);
@@ -3686,7 +3691,7 @@ class PdfWriter {
   }
   reasonHeader(title, subtitle, continued = false) {
     this.ensure(26);
-    this.drawLogo(this.margin, this.y - 4, 17, 17);
+    this.currentHeader = { kind: "reason", title, subtitle };
     this.setFont(15, "bold", PDF_VEC.text);
     this.pdf.text(title, PDF_MM.w / 2, this.y, { align: "center" });
     this.y += 6.5;
@@ -3905,7 +3910,7 @@ const drawAdvisorDisclosureVector = (w, ad) => {
     w.textBlock("I will notify you immediately of any other existing or perceived conflict of interest that may relate to any life insurance recommendation that I make if they arise.");
   });
   w.finishPage();
-  w.addPage(); w.header("Insurance Disclosure (continued)", "", "Page 2 of 3");
+  w.addPage(); w.header("Insurance Disclosure and Privacy Consent", "", "Page 2 of 3");
   w.section("Insurance Compensation", () => {
     w.textBlock("I am compensated by sales commission on policies I sell and may receive a renewal (or service) commission on policies that remain active. Commissions are paid by the insurance company that provides the product you purchased. For certain products I may receive a referral fee.");
     w.textBlock("I may be eligible for additional compensation and other benefits, such as bonuses and professional conferences which may be based on my sales reaching a certain level. I may also be entitled to participate in a share purchase plan.");
@@ -3920,7 +3925,7 @@ const drawAdvisorDisclosureVector = (w, ad) => {
     w.textBlock("In accordance with applicable law and by your written request, you have the right to review the personal information in your client file, request corrections to this information, and revoke your consent subject to contractual limitations.");
   });
   w.finishPage();
-  w.addPage(); w.header("Acknowledgment and Consent", "", "Page 3 of 3");
+  w.addPage(); w.header("Insurance Disclosure and Privacy Consent", "", "Page 3 of 3");
   w.section("Compliance with Canadian Anti-Spam Law (CASL)", () => {
     w.textBlock("I consent to receiving electronic communications from Jie Yuan about my insurance and/or investment needs and coverage and information about products and services that might benefit me. I understand that I may withdraw my consent at any time.");
     w.textBlock("By signing below, you give your consent to collect and maintain your personal information in your client file and consent to receiving electronic communications.", { bold: true });
