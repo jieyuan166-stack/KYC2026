@@ -3527,37 +3527,8 @@ const cleanPdfText = (value) => {
     .replace(/[•·]/g, "-")
     .replace(/[–—]/g, "-")
     .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'");
-};
-const pdfByteString = (buffer) => {
-  const bytes = new Uint8Array(buffer);
-  let out = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    out += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-  }
-  return btoa(out);
-};
-const loadVectorPdfFont = async (pdf) => {
-  const urls = [
-    "./fonts/NotoSansSC-Regular.ttf",
-    "https://cdn.jsdelivr.net/gh/googlefonts/noto-cjk@main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf",
-  ];
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, { cache: "force-cache" });
-      if (!res.ok) continue;
-      const base64 = pdfByteString(await res.arrayBuffer());
-      const file = url.endsWith(".otf") ? "NotoSansCJKsc-Regular.otf" : "NotoSansSC-Regular.ttf";
-      pdf.addFileToVFS(file, base64);
-      pdf.addFont(file, "TritonSans", "normal");
-      pdf.addFont(file, "TritonSans", "bold");
-      return "TritonSans";
-    } catch (err) {
-      console.warn("[pdf] embedded font load failed:", err);
-    }
-  }
-  return "helvetica";
+    .replace(/[‘’]/g, "'")
+    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, "");
 };
 class PdfWriter {
   constructor(pdf, fontName = "helvetica") {
@@ -4042,8 +4013,7 @@ const drawReasonWhyVector = (w, data, fromAttachment = false) => {
 const buildVectorPdf = async (data) => {
   const { jsPDF } = window.jspdf;
   const pdf = new jsPDF("p", "mm", "letter");
-  const fontName = await loadVectorPdfFont(pdf);
-  const w = new PdfWriter(pdf, fontName);
+  const w = new PdfWriter(pdf, "helvetica");
   const sf = data.segregatedFundInvestment || {};
   const isSegFund = data.businessType === "Segregated Fund Investment";
   const isLifeIns = data.businessType === "Life Insurance";
