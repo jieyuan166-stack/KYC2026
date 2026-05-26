@@ -3504,7 +3504,7 @@ const PrintableDocument = ({ data }) => {
 const PDF_MM = { w: 215.9, h: 279.4 };
 const PDF_VEC = {
   margin: 15,
-  reasonMargin: 23.8,
+  reasonMargin: 18,
   footerY: 270,
   navy: NAVY,
   gold: GOLD,
@@ -3513,6 +3513,8 @@ const PDF_VEC = {
   text: TEXT_COLOR,
   soft: TEXT_SOFT,
   line: "#D8DCE5",
+  tableHeader: "#F3F1EA",
+  panel: "#FBFAF7",
   highlight: "#FFF3B8",
 };
 const cleanPdfText = (value) => {
@@ -3594,6 +3596,36 @@ class PdfWriter {
     this.y += lines.length * lineH + gap;
     return lines.length * lineH + gap;
   }
+  drawJustifiedLine(line, x, y, width, size) {
+    const words = cleanPdfText(line).trim().split(/\s+/).filter(Boolean);
+    if (words.length < 4) {
+      this.pdf.text(line, x, y);
+      return;
+    }
+    const wordsWidth = words.reduce((sum, word) => sum + this.pdf.getTextWidth(word), 0);
+    const extra = (width - wordsWidth) / (words.length - 1);
+    if (!Number.isFinite(extra) || extra < 1.1 || extra > 4.2) {
+      this.pdf.text(line, x, y);
+      return;
+    }
+    let cursor = x;
+    words.forEach((word, idx) => {
+      this.pdf.text(word, cursor, y);
+      cursor += this.pdf.getTextWidth(word) + (idx === words.length - 1 ? 0 : extra);
+    });
+  }
+  textBlockJustified(text, { x = this.x, width = this.contentW, size = 9.8, lineH = 5.6, color = PDF_VEC.text, gap = 4.5, reasonTitle = "Reason Why Letter", reasonSubtitle = "" } = {}) {
+    const lines = this.textLines(text, width, size);
+    this.ensure(lines.length * lineH + gap + 1, { reason: true, reasonTitle, reasonSubtitle });
+    this.setFont(size, "normal", color);
+    lines.forEach((line, idx) => {
+      const isLast = idx === lines.length - 1;
+      if (isLast) this.pdf.text(line, x, this.y + idx * lineH);
+      else this.drawJustifiedLine(line, x, this.y + idx * lineH, width, size);
+    });
+    this.y += lines.length * lineH + gap;
+    return lines.length * lineH + gap;
+  }
   cover(data) {
     const ad = data.advisorDisclosure || {};
     this.addPage({ cover: true, margin: 16 });
@@ -3649,20 +3681,24 @@ class PdfWriter {
     this.ensure(26);
     this.setFont(15, "bold", PDF_VEC.text);
     this.pdf.text(title, PDF_MM.w / 2, this.y, { align: "center" });
-    this.y += 6;
+    this.y += 6.5;
     this.setFont(9, "normal", PDF_VEC.soft);
     this.pdf.text(cleanPdfText(subtitle), PDF_MM.w / 2, this.y, { align: "center", maxWidth: this.contentW });
-    this.y += continued ? 9 : 10;
+    this.y += continued ? 10 : 11;
   }
   section(title, fn, minHeight = 18) {
-    this.ensure(minHeight + 10);
-    this.pdf.setFillColor(PDF_VEC.navy);
-    this.pdf.rect(this.x, this.y, this.contentW, 7, "F");
-    this.setFont(9.2, "bold", "#FFFFFF");
-    this.pdf.text(cleanPdfText(title), this.x + 3, this.y + 4.8);
-    this.y += 10;
+    this.ensure(minHeight + 12);
+    this.pdf.setDrawColor(PDF_VEC.gold);
+    this.pdf.setLineWidth(0.6);
+    this.pdf.line(this.x, this.y - 1.5, this.x, this.y + 5.5);
+    this.setFont(10.2, "bold", PDF_VEC.navy);
+    this.pdf.text(cleanPdfText(title), this.x + 3.2, this.y + 3.5);
+    this.pdf.setDrawColor(PDF_VEC.creamDeep);
+    this.pdf.setLineWidth(0.2);
+    this.pdf.line(this.x + 3.2, this.y + 6.4, this.x + this.contentW, this.y + 6.4);
+    this.y += 12;
     fn();
-    this.y += 3;
+    this.y += 5;
   }
   field(label, value, width = this.contentW / 2 - 3) {
     const x = this.x;
@@ -3670,13 +3706,13 @@ class PdfWriter {
     this.setFont(7.8, "bold", PDF_VEC.soft);
     this.pdf.text(cleanPdfText(label), x, startY);
     const lines = this.textLines(value || " ", width, 9.2);
-    const h = Math.max(10, lines.length * 4.3 + 4);
+    const h = Math.max(11, lines.length * 4.6 + 4.5);
     this.ensure(h + 5);
     this.setFont(9.2, "normal", PDF_VEC.text);
     this.pdf.text(lines, x, startY + 5);
     this.pdf.setDrawColor(PDF_VEC.navy);
     this.pdf.line(x, startY + h, x + width, startY + h);
-    this.y = startY + h + 4;
+    this.y = startY + h + 5;
   }
   fields(items, columns = 2) {
     const gap = 6;
@@ -3690,14 +3726,14 @@ class PdfWriter {
         this.setFont(7.8, "bold", PDF_VEC.soft);
         this.pdf.text(cleanPdfText(it[0]), x, y0);
         const lines = this.textLines(it[1] || " ", width, 9.2);
-        const h = Math.max(11, lines.length * 4.3 + 5);
+        const h = Math.max(12, lines.length * 4.6 + 5.5);
         this.setFont(9.2, "normal", PDF_VEC.text);
         this.pdf.text(lines, x, y0 + 5);
         this.pdf.setDrawColor(PDF_VEC.navy);
         this.pdf.line(x, y0 + h, x + width, y0 + h);
         maxH = Math.max(maxH, h);
       });
-      this.y = y0 + maxH + 5;
+      this.y = y0 + maxH + 6;
       this.ensure(12);
     }
   }
@@ -3709,31 +3745,31 @@ class PdfWriter {
       this.setFont(7, "bold", PDF_VEC.navy);
       this.pdf.text("X", this.x + 0.75, this.y - 0.2);
     }
-    this.textBlock(label, { x: this.x + 6, width: this.contentW - 6, size: 8.7, lineH: 4.2, gap: 0 });
+    this.textBlock(label, { x: this.x + 6, width: this.contentW - 6, size: 8.8, lineH: 4.7, gap: 0.5 });
   }
   longField(label, value, minH = 18) {
     this.ensure(minH + 11);
     this.setFont(7.8, "bold", PDF_VEC.soft);
     this.pdf.text(cleanPdfText(label), this.x, this.y);
     this.y += 3;
-    const lines = this.textLines(value || " ", this.contentW - 6, 9);
-    const h = Math.max(minH, lines.length * 4.4 + 5);
-    this.pdf.setFillColor("#FAFAF6");
+    const lines = this.textLines(value || " ", this.contentW - 7, 9.2);
+    const h = Math.max(minH, lines.length * 5 + 6);
+    this.pdf.setFillColor(PDF_VEC.panel);
     this.pdf.setDrawColor(PDF_VEC.creamDeep);
     this.pdf.rect(this.x, this.y, this.contentW, h, "FD");
-    this.setFont(9, "normal", PDF_VEC.text);
+    this.setFont(9.2, "normal", PDF_VEC.text);
     this.pdf.text(lines, this.x + 3, this.y + 5);
-    this.y += h + 4;
+    this.y += h + 6;
   }
   table(headers, rows, widths = null) {
     const colW = widths || headers.map(() => this.contentW / headers.length);
     const drawHeader = () => {
-      this.pdf.setFillColor(PDF_VEC.navy);
-      this.pdf.setDrawColor(PDF_VEC.navy);
+      this.pdf.setFillColor(PDF_VEC.tableHeader);
+      this.pdf.setDrawColor(PDF_VEC.creamDeep);
       let x = this.x;
       headers.forEach((h, i) => {
         this.pdf.rect(x, this.y, colW[i], 7, "FD");
-        this.setFont(7.7, "bold", "#FFFFFF");
+        this.setFont(7.9, "bold", PDF_VEC.navy);
         this.pdf.text(this.textLines(h, colW[i] - 3, 7.7), x + 1.5, this.y + 4.6);
         x += colW[i];
       });
@@ -3742,25 +3778,25 @@ class PdfWriter {
     this.ensure(16);
     drawHeader();
     rows.forEach((row, ri) => {
-      const cellLines = row.map((cell, i) => this.textLines(cleanPdfText(cell) || " ", colW[i] - 3, 8.2));
-      const h = Math.max(8, Math.max(...cellLines.map(lines => lines.length * 3.8 + 4)));
+      const cellLines = row.map((cell, i) => this.textLines(cleanPdfText(cell) || " ", colW[i] - 3, 8.3));
+      const h = Math.max(9, Math.max(...cellLines.map(lines => lines.length * 4.3 + 4.5)));
       if (this.y + h > 258) {
         this.finishPage();
         this.addPage();
         drawHeader();
       }
       let x = this.x;
-      this.pdf.setFillColor(ri % 2 ? "#FAFAF6" : "#FFFFFF");
+      this.pdf.setFillColor(ri % 2 ? PDF_VEC.panel : "#FFFFFF");
       row.forEach((cell, i) => {
         this.pdf.setDrawColor(PDF_VEC.creamDeep);
         this.pdf.rect(x, this.y, colW[i], h, "FD");
-        this.setFont(8.2, "normal", PDF_VEC.text);
-        this.pdf.text(cellLines[i], x + 1.5, this.y + 4.5);
+        this.setFont(8.3, "normal", PDF_VEC.text);
+        this.pdf.text(cellLines[i], x + 1.5, this.y + 5);
         x += colW[i];
       });
       this.y += h;
     });
-    this.y += 4;
+    this.y += 6;
   }
   signature(name, role = "Client", width = 62) {
     this.ensure(24);
@@ -3787,14 +3823,14 @@ class PdfWriter {
   }
   summary(label, value) {
     this.ensure(18);
-    this.pdf.setFillColor("#FAFAF6");
+    this.pdf.setFillColor(PDF_VEC.panel);
     this.pdf.setDrawColor(PDF_VEC.creamDeep);
     this.pdf.rect(this.x, this.y, this.contentW, 16, "FD");
     this.setFont(7.8, "bold", PDF_VEC.soft);
     this.pdf.text(cleanPdfText(label), this.x + 3, this.y + 5);
     this.setFont(12, "bold", PDF_VEC.text);
     this.pdf.text(cleanPdfText(value || " - "), this.x + 3, this.y + 12);
-    this.y += 20;
+    this.y += 22;
   }
 }
 const pdfRows = (rows) => rows.map(row => row.map(cell => cleanPdfText(cell)));
@@ -3974,8 +4010,8 @@ const drawLifeInsuranceVector = (w, li) => {
 };
 const reasonBlockHeight = (w, block) => {
   const size = block.type === "heading" ? 10.5 : 9.6;
-  const lineH = block.type === "heading" ? 4.5 : 4.8;
-  return w.textLines(block.text, w.contentW, size).length * lineH + (block.type === "heading" ? 4 : 6);
+  const lineH = block.type === "heading" ? 5 : 5.6;
+  return w.textLines(block.text, w.contentW, size).length * lineH + (block.type === "heading" ? 5 : 8);
 };
 const drawReasonWhyVector = (w, data, fromAttachment = false) => {
   const ctx = reasonWhyContext(data);
@@ -3995,8 +4031,8 @@ const drawReasonWhyVector = (w, data, fromAttachment = false) => {
       w.addPage({ margin: PDF_VEC.reasonMargin });
       w.reasonHeader("Reason Why Letter", subtitle, true);
     }
-    if (block.type === "heading") w.textBlock(block.text, { size: 10.5, lineH: 4.5, bold: true, gap: 2 });
-    else w.textBlock(block.text, { size: 9.6, lineH: 4.8, gap: 4 });
+    if (block.type === "heading") w.textBlock(block.text, { size: 10.5, lineH: 5, bold: true, gap: 3 });
+    else w.textBlockJustified(block.text, { size: 9.7, lineH: 5.6, gap: 4.6, reasonSubtitle: subtitle });
   }
   if (w.y + 34 > 258) {
     w.finishPage();
@@ -4004,8 +4040,8 @@ const drawReasonWhyVector = (w, data, fromAttachment = false) => {
     w.reasonHeader("Reason Why Letter", subtitle, true);
   }
   if (!hasClientAcknowledgement(rawBlocks)) {
-    w.textBlock("Client Acknowledgement", { size: 10, bold: true, gap: 2 });
-    w.textBlock(CLIENT_ACK_TEXT, { size: 9.5, lineH: 4.6, gap: 4 });
+    w.textBlock("Client Acknowledgement", { size: 10, bold: true, gap: 3 });
+    w.textBlockJustified(CLIENT_ACK_TEXT, { size: 9.6, lineH: 5.5, gap: 5, reasonSubtitle: subtitle });
   }
   w.signature(ctx.clientName, "Client");
   w.finishPage();
