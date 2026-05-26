@@ -4368,30 +4368,6 @@ const collectMissingItems = (data) => {
 
   return items;
 };
-const drawMissingItemsVector = (w, items) => {
-  w.addPage();
-  w.header("Missing Items / Fields To Review", "Review before client signature", "Final Review");
-  w.section("Fields To Review", () => {
-    if (!items.length) {
-      w.textBlock("No missing items identified based on the exported PDF data.", { size: 10, bold: true, lineH: 5.2 });
-      return;
-    }
-    w.textBlock("The following fields or questionnaire answers appear incomplete in the exported PDF data. Review these items before final signing.", { size: 9.2, lineH: 5.1, gap: 4 });
-    items.forEach((item, idx) => {
-      const label = cleanPdfText(item.label);
-      const section = cleanPdfText(item.section);
-      const lines = w.textLines(label, w.contentW - 9, 8.6);
-      const h = Math.max(8.5, lines.length * 4.1 + 5.5);
-      w.ensure(h + 1);
-      w.setFont(8.6, "bold", PDF_VEC.navy);
-      w.pdf.text(`${idx + 1}. ${section}`, w.x, w.y);
-      w.setFont(8.6, "normal", PDF_VEC.text);
-      w.pdf.text(lines, w.x + 8, w.y + 4.5);
-      w.y += h;
-    });
-  });
-  w.finishPage();
-};
 const buildVectorPdf = async (data) => {
   const { jsPDF } = window.jspdf;
   const pdf = new jsPDF("p", "mm", "letter");
@@ -4410,8 +4386,18 @@ const buildVectorPdf = async (data) => {
     if (!reasonWhyHasAttachment(rw) && rw.accountType && hasText(rw.body)) drawReasonWhyVector(w, data, false);
   }
   if (isLifeIns) drawLifeInsuranceVector(w, data.lifeInsurance.needsAnalysis || {});
-  drawMissingItemsVector(w, collectMissingItems(data));
   return pdf;
+};
+
+const missingItemLine = (item, idx) => `${idx + 1}. ${item.section} - ${item.label}`;
+const missingItemsConfirmText = (items) => {
+  const shown = items.slice(0, 18).map(missingItemLine).join("\n");
+  const more = items.length > 18 ? `\n...and ${items.length - 18} more item(s).` : "";
+  return `Internal Missing Items / Fields To Review\n\n${shown}${more}\n\nThese items will NOT be included in the client PDF.\n\nChoose OK to export/send anyway, or Cancel to return to the Review page.`;
+};
+const confirmMissingItemsBeforeExport = (items) => {
+  if (!items.length) return true;
+  return window.confirm(missingItemsConfirmText(items));
 };
 
 /* ============================================================
@@ -4698,6 +4684,7 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
   };
 
   const downloadPdf = async () => {
+    if (!confirmMissingItemsBeforeExport(missingItems)) return;
     setGenerating(true);
     try {
       const pdf = await buildPdf();
@@ -4712,6 +4699,9 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
   };
 
   const getPdfBlob = async () => {
+    if (!confirmMissingItemsBeforeExport(missingItems)) {
+      throw new Error("PDF generation cancelled. Review missing items before sending.");
+    }
     const pdf = await buildPdf();
     const reasonWhyForExport = makeReasonWhy(effectivePdfData.segregatedFundInvestment?.reasonWhy);
     return mergePdfAttachment(pdf, reasonWhyForExport.attachment);
@@ -4721,6 +4711,7 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
   const reasonWhy = makeReasonWhy(sf.reasonWhy);
   const hasReasonWhyAttachment = reasonWhyHasAttachment(reasonWhy);
   const effectivePdfData = effectiveReasonWhyData(data);
+  const missingItems = collectMissingItems(effectivePdfData);
   const setReasonWhy = (patch) => update("segregatedFundInvestment", {
     ...sf,
     reasonWhy: { ...reasonWhy, ...patch },
@@ -4836,6 +4827,28 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
           <div className="text-lg font-semibold text-navy mt-2">Compliance File  -  {data.businessType || " - "}</div>
           <div className="text-xs text-gray-500">Generated: {new Date().toLocaleString()}</div>
         </div>
+
+        <ReviewPanel title="Internal Missing Items / Fields To Review">
+          <div className="text-xs text-gray-600 mb-3">
+            This checklist is only shown inside the portal. It is not included in the client PDF or Adobe Sign package.
+          </div>
+          {missingItems.length ? (
+            <div className="rounded border border-amber-300 bg-amber-50 p-3">
+              <div className="text-sm font-semibold text-amber-900 mb-2">{missingItems.length} item(s) may need review before signing.</div>
+              <ol className="list-decimal pl-5 space-y-1 text-xs text-amber-950">
+                {missingItems.map((item, idx) => (
+                  <li key={`${item.section}-${item.label}-${idx}`}>
+                    <span className="font-semibold">{item.section}</span> - {item.label}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ) : (
+            <div className="rounded border border-emerald-300 bg-emerald-50 p-3 text-sm font-semibold text-emerald-900">
+              No missing items identified based on the exported PDF data.
+            </div>
+          )}
+        </ReviewPanel>
 
         <ReviewPanel title="1. TRITON Advisor Disclosure & Privacy Commitment">
           <ReviewSummaryRow label="Client name (acknowledgment)" value={ad.clientName} />
