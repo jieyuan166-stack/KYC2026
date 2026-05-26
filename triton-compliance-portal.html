@@ -3786,23 +3786,24 @@ class PdfWriter {
     this.y += 6;
   }
   signature(name, role = "Client", width = 62) {
-    this.ensure(24);
+    const sigW = width;
+    const dateW = 56;
+    this.ensure(28);
     const x = this.x;
     this.setFont(7.6, "bold", PDF_VEC.soft);
     this.pdf.text(cleanPdfText(name || role), x, this.y);
+    this.setFont(7.4, "bold", PDF_VEC.navy);
+    this.pdf.text(`${role} Signature`, x, this.y + 6);
+    this.pdf.text("Date", x + sigW + 8, this.y + 6);
     this.pdf.setFillColor(PDF_VEC.signatureBox);
     this.pdf.setDrawColor(PDF_VEC.gold);
-    this.pdf.rect(x, this.y + 3, width, 12, "FD");
-    this.setFont(8.2, "bold", PDF_VEC.navy);
-    this.pdf.text(`${role} Signature`, x + 2, this.y + 10);
+    this.pdf.rect(x, this.y + 8, sigW, 13, "FD");
     this.pdf.setFillColor(PDF_VEC.dateBox);
     this.pdf.setDrawColor(PDF_VEC.gold);
-    this.pdf.rect(x + width + 6, this.y + 3, 34, 12, "FD");
-    this.setFont(8.2, "bold", PDF_VEC.navy);
-    this.pdf.text("Date", x + width + 8, this.y + 10);
+    this.pdf.rect(x + sigW + 8, this.y + 8, dateW, 13, "FD");
     this.pdf.setFillColor("#FFFFFF");
     this.pdf.setTextColor(PDF_VEC.text);
-    this.y += 21;
+    this.y += 26;
   }
   initials(label = "Client Initials") {
     this.ensure(14);
@@ -3823,6 +3824,34 @@ class PdfWriter {
     this.setFont(12, "bold", PDF_VEC.text);
     this.pdf.text(cleanPdfText(value || " - "), this.x + 3, this.y + 12);
     this.y += 22;
+  }
+  optionLine(option, selected, width = this.contentW - 7) {
+    const text = `${option.l}${option.p !== undefined ? ` (${option.p} pts)` : ""}`;
+    const lines = this.textLines(text, width - 9, 8.1);
+    const h = Math.max(5.6, lines.length * 3.9 + 1.3);
+    this.ensure(h + 1);
+    this.pdf.setDrawColor(PDF_VEC.navy);
+    this.pdf.rect(this.x + 2, this.y - 3, 3.4, 3.4);
+    if (selected) {
+      this.setFont(7, "bold", PDF_VEC.navy);
+      this.pdf.text("X", this.x + 2.75, this.y - 0.2);
+    }
+    this.setFont(8.1, selected ? "bold" : "normal", PDF_VEC.text);
+    this.pdf.text(lines, this.x + 8, this.y);
+    this.y += h;
+  }
+  questionOptionBlock(question, selectedValue) {
+    const qLines = this.textLines(question.label, this.contentW, 8.7);
+    const firstOptionsH = question.options.slice(0, 2).reduce((s, option) => {
+      const lines = this.textLines(`${option.l}${option.p !== undefined ? ` (${option.p} pts)` : ""}`, this.contentW - 16, 8.1);
+      return s + Math.max(5.6, lines.length * 3.9 + 1.3);
+    }, 0);
+    this.ensure(qLines.length * 4.2 + firstOptionsH + 7);
+    this.setFont(8.7, "bold", PDF_VEC.navy);
+    this.pdf.text(qLines, this.x, this.y);
+    this.y += qLines.length * 4.2 + 1.5;
+    question.options.forEach(option => this.optionLine(option, choiceMatches(option.l, selectedValue)));
+    this.y += 2.4;
   }
 }
 const pdfRows = (rows) => rows.map(row => row.map(cell => cleanPdfText(cell)));
@@ -3942,40 +3971,130 @@ const drawNonLeverageVector = (w, nl) => {
   w.section("Acknowledgement", () => { w.textBlock("I/We have reviewed this Sales Suitability Summary with my advisor and confirm the information above is accurate."); w.signature(nl.clientNames, "Client(s)"); w.signature("Jie Yuan", "Advisor"); });
   w.finishPage();
 };
-const drawQuestionnaireVector = (w, title, subtitle, infoFields, rows, signatures = []) => {
-  w.addPage(); w.header(title, subtitle, title);
-  if (infoFields?.length) w.section("Information", () => w.fields(infoFields, 2));
-  w.section("Questionnaire Responses", () => w.table(["Question", "Response"], pdfRows(rows), [w.contentW * 0.68, w.contentW * 0.32], {
-    responseColumnIndex: 1,
-    responseFill: "#FFFFFF",
-    responseText: PDF_VEC.text,
+const normalizeChoice = (value) => cleanPdfText(value).replace(/\s+/g, " ").trim();
+const choiceMatches = (a, b) => normalizeChoice(a) === normalizeChoice(b);
+const questionnaireScore = (questions, data) => questions.reduce((sum, question) => {
+  const selected = question.options.find(option => choiceMatches(option.l, data?.[question.key]));
+  return sum + (selected ? selected.p : 0);
+}, 0);
+const drawQuestionOptions = (w, questions, data) => questions.forEach(question => w.questionOptionBlock(question, data?.[question.key]));
+const drawProfileResult = (w, summaryRows, rangeRows, headers = ["Score range", "Profile"]) => {
+  w.fields(summaryRows, 2);
+  w.table(headers, pdfRows(rangeRows), headers.length === 3 ? [34, 34, w.contentW - 68] : [w.contentW * 0.42, w.contentW * 0.58], {
     headerFill: "#F7F5EE",
     headerText: PDF_VEC.navy,
-  }));
-  if (signatures.length) w.section("Signatures", () => signatures.forEach(sig => w.signature(sig[0], sig[1])));
-  w.finishPage();
+  });
 };
+const manulifeQuestions = [
+  { key:"q1", label:"1. What is your investment horizon - when will you need this money?", options:[{l:"Within 3 years",p:1},{l:"3-5 years",p:4},{l:"6-10 years",p:6},{l:"11-15 years",p:9},{l:"15+ years",p:11}] },
+  { key:"q2", label:"2. What is your most important investment goal?", options:[{l:"To preserve your money",p:1},{l:"To see modest growth",p:5},{l:"To see more significant growth",p:8},{l:"To earn the highest return possible",p:11}] },
+  { key:"q3", label:"3. Please indicate which statement reflects your overall view of managing risk:", options:[{l:"I don't like risk and I am not prepared to expose my investments to any market fluctuations in order to earn higher long-term returns.",p:1},{l:"I am prepared to experience modest short-term market fluctuations in order to generate growth of capital.",p:3},{l:"I am prepared to experience average short-term market fluctuations in order to achieve a higher long-term return.",p:5},{l:"I want to maximize my long-term returns and am comfortable with significant short-term market fluctuations.",p:7}] },
+  { key:"q4", label:"4. If you owned an investment that declined by 20% over a short period, what would you do?", options:[{l:"Sell all of the remaining investment",p:1},{l:"Sell a portion of the remaining investment",p:3},{l:"Hold the investment and sell nothing",p:5},{l:"Buy more of the investment",p:7}] },
+  { key:"q5", label:"5. If you could increase your chances of improving your investment returns by taking more risk, would you:", options:[{l:"Be unlikely to take more risk",p:1},{l:"Be willing to take a little more risk with some of your portfolio",p:3},{l:"Be willing to take a lot more risk with some of your portfolio",p:5},{l:"Be willing to take a lot more risk with your entire portfolio",p:7}] },
+  { key:"q6", label:"6. Which model portfolio would you be most likely to hold?", options:[{l:"Portfolio A (best +8% / worst -1%)",p:1},{l:"Portfolio B (best +15% / worst -6%)",p:4},{l:"Portfolio C (best +22% / worst -12%)",p:7}] },
+  { key:"q7", label:"7. After several years of following your retirement plan, you review your progress and determine you are behind schedule and will need to modify your strategy in order to retire at your preferred age. What would you do?", options:[{l:"Keep the same investments you currently hold, but increase your contributions as much as possible.",p:1},{l:"Slightly increase your exposure to riskier investments and slightly increase your contributions.",p:4},{l:"Move your entire portfolio to riskier investments, hoping to achieve the highest long-term return.",p:7}] },
+  { key:"q8", label:"8. Which statement best applies to your approach regarding achieving your retirement income goals on time?", options:[{l:"I must achieve my financial goal by my target retirement date.",p:1},{l:"I would like to come close to achieving my financial goal by my target retirement date.",p:3},{l:"If I have not reached my financial goal by my target retirement date, I have the flexibility to delay my target retirement date.",p:5},{l:"I re-evaluate my financial goals and target retirement date regularly and have the flexibility to adjust them to align with the performance of my investments.",p:7}] },
+];
+const iaQuestions = [
+  { key:"q1", label:"1. How old are you?", options:[{l:"Over 71",p:1},{l:"Between 65 and 70",p:2},{l:"Between 55 and 64",p:5},{l:"Between 41 and 54",p:10},{l:"Between 18 and 40",p:20}] },
+  { key:"q2", label:"2. When do you plan to start withdrawing at least 25% of your savings?", options:[{l:"In less than 1 year",p:1},{l:"Between 1 and 3 years",p:2},{l:"Between 4 and 5 years",p:5},{l:"Between 6 and 9 years",p:10},{l:"In over 10 years",p:20}] },
+  { key:"q3", label:"3. Over the next five years, you plan to:", options:[{l:"Make regular withdrawals from your capital (Home Buyers' Plan, retirement, etc.)",p:1},{l:"Withdraw all your investment earnings and a portion of your capital.",p:2},{l:"Withdraw all your investment earnings without touching your capital.",p:5},{l:"Withdraw only a portion of your investment earnings.",p:10},{l:"Accumulate savings with your investment earnings (no withdrawals).",p:20}] },
+  { key:"q4", label:"4. What is your gross annual income? (before taxes)", options:[{l:"$25,000 and less",p:1},{l:"$25,001 to $35,000",p:2},{l:"$35,001 to $50,000",p:5},{l:"$50,001 to $100,000",p:10},{l:"$100,001 and over",p:20}] },
+  { key:"q5", label:"5. What is your net worth? (assets minus liabilities)", options:[{l:"$25,000 and less",p:1},{l:"$25,001 to $50,000",p:2},{l:"$50,001 to $100,000",p:5},{l:"$100,001 to $200,000",p:10},{l:"$200,001 and over",p:20}] },
+  { key:"q6", label:"6. Indicate your level of tolerance toward the risks related to the investment of your money.", options:[{l:"Very low - sole objective is to safely conserve investments and shelter from market fluctuations.",p:1},{l:"Low - can tolerate occasional drops to a maximum of 5%.",p:2},{l:"Moderate - short-term drop of 5% to 10%.",p:5},{l:"High - short-term drop of 10% to 20%.",p:10},{l:"Very high - short-term drop (less than 1 year) of 20% does not worry me.",p:20}] },
+  { key:"q7", label:"7. After one year, in what range would you accept the final potential value of a $10,000 investment?", options:[{l:"Gains only, between $10,000 and $10,300",p:1},{l:"Between $9,500 and $11,000",p:2},{l:"Between $9,000 and $11,500",p:5},{l:"Between $8,500 and $12,000",p:10},{l:"Between $8,000 and $12,500",p:20}] },
+  { key:"q8", label:"8. What is your level of knowledge about investments?", options:[{l:"Very low - just becoming familiar.",p:1},{l:"Low - know certain investments are riskier than others.",p:2},{l:"Moderate - know about different investment types and their risks.",p:5},{l:"Advanced - understand earnings potential and risks involved.",p:10},{l:"Very advanced - constant eye on stock markets, in-depth knowledge.",p:20}] },
+];
+const canadaQuestions = [
+  { sec:1, key:"q1", label:"1. What is the intent of your portfolio?", options:[{l:"To generate income for today",p:0},{l:"To generate income at a later date",p:10},{l:"To provide for my dependents (I do not anticipate using these funds)",p:15},{l:"To fund a large purchase in the future",p:10}] },
+  { sec:1, key:"q2", label:"2. What is your major goal for your portfolio?", options:[{l:"To ensure my portfolio remains secure",p:2},{l:"To see my portfolio grow and to avoid fluctuating returns",p:5},{l:"To balance growth and security, and to keep pace with inflation",p:10},{l:"To provide growth potential, and to accept some fluctuation in returns",p:15},{l:"To provide the sole objective of potential long-term growth",p:20}] },
+  { sec:2, key:"q3", label:"3. Which range includes your age?", options:[{l:"Under 30",p:15},{l:"30 to 39",p:15},{l:"40 to 49",p:15},{l:"50 to 59",p:10},{l:"60 to 69",p:5},{l:"70 to 79",p:3},{l:"Over 79",p:2}] },
+  { sec:2, key:"q4", label:"4. Current annual family income before taxes (including pensions):", options:[{l:"Under $30,000",p:4},{l:"$30,000 to $60,000",p:6},{l:"$60,001 to $90,000",p:8},{l:"$90,001 to $120,000",p:10},{l:"More than $120,000",p:10}] },
+  { sec:2, key:"q5", label:"5. After deducting any loan or mortgage balances, immediate family's overall net worth:", options:[{l:"Under $30,000",p:2},{l:"$30,000 to $50,000",p:4},{l:"$50,001 to $100,000",p:6},{l:"$100,001 to $200,000",p:8},{l:"$200,001 to $300,000",p:10},{l:"More than $300,000",p:10}] },
+  { sec:3, key:"q6", label:"6. When do you anticipate using these funds?", options:[{l:"Immediately",p:0},{l:"One to three years",p:0},{l:"Four to five years",p:5},{l:"Six to 10 years",p:10},{l:"11 to 15 years",p:15},{l:"16 to 20 years",p:20},{l:"More than 20 years",p:20}] },
+  { sec:3, key:"q7", label:"7. At the time you need this money, when will you withdraw it?", options:[{l:"All at once, in one lump sum",p:3},{l:"Over a period of less than two years",p:3},{l:"Over a period of two to five years",p:5},{l:"Over a period of six to nine years",p:8},{l:"Over a period of 10 to 15 years",p:10},{l:"Over a period of more than 15 years",p:15}] },
+  { sec:3, key:"q8", label:"8. Intentions regarding withdrawals and/or contributions over the next five years?", options:[{l:"I plan to withdraw money at regular intervals and do not plan on making contributions.",p:5},{l:"I will likely make a lump-sum withdrawal and do not plan on making contributions.",p:7},{l:"I will likely be making both contributions and withdrawals.",p:8},{l:"I will likely make additional contributions and will not be withdrawing any funds.",p:10},{l:"I will certainly make regular contributions and will not be withdrawing any funds.",p:15}] },
+  { sec:4, key:"q9", label:"9. Which statement best describes your knowledge of investments?", options:[{l:"Very little knowledge - rely exclusively on financial advisors.",p:2},{l:"Limited knowledge of stocks and bonds; do not follow financial markets.",p:5},{l:"Good working knowledge; regularly follow financial markets.",p:8},{l:"Understand completely; follow financial markets closely.",p:10}] },
+  { sec:4, key:"q10", label:"10. How long are you prepared to hold investments in anticipation of a recovery?", options:[{l:"Less than three months",p:5},{l:"Three to six months",p:8},{l:"Six months to one year",p:10},{l:"One to two years",p:15},{l:"Two to three years",p:20},{l:"Three years or more",p:25}] },
+  { sec:4, key:"q11", label:"11. Maximum drop in a $100,000 portfolio you could tolerate in any year:", options:[{l:"Uncomfortable with any loss",p:2},{l:"$5,000 drop",p:5},{l:"$10,000 decline",p:10},{l:"$15,000 drop",p:15},{l:"$20,000 decline",p:20},{l:"More than $20,000",p:25}] },
+  { sec:4, key:"q12", label:"12. Which statement most correctly describes your investment philosophy?", options:[{l:"I cannot accept any fluctuation in principal.",p:5},{l:"I can only accept minimal fluctuations and prefer to invest in safer, lower-return investments.",p:10},{l:"I am willing to tolerate some ups and downs to achieve overall higher returns in the long run.",p:20},{l:"My main interest is high, long-term returns and I am not concerned about short-term decreases.",p:30}] },
+  { sec:5, key:"q13", label:"13. Which hypothetical portfolio would you prefer to invest in?", options:[{l:"Portfolio A (best +13% / worst -2%)",p:5},{l:"Portfolio B (best +20% / worst -7%)",p:10},{l:"Portfolio C (best +28% / worst -13%)",p:20},{l:"Portfolio D (best +37% / worst -20%)",p:30}] },
+  { sec:5, key:"q14", label:"14. I am willing to experience potentially large and frequent declines in the value of my investment if it will increase the likelihood of achieving higher long-term returns.", options:[{l:"Strongly agree",p:20},{l:"Agree",p:15},{l:"Disagree",p:10},{l:"Strongly disagree",p:5}] },
+];
+const equitableQuestions = [
+  { key:"q1", label:"1. How would you describe your investment knowledge?", options:[{l:"Limited: little to no knowledge of investing.",p:0},{l:"Basic: understand basic concepts (e.g., difference between stocks and bonds).",p:2},{l:"Good: familiar with major market characteristics and investment types.",p:4},{l:"Advanced: understand investment risks/rewards and have in-depth knowledge.",p:6}] },
+  { key:"q2", label:"2. What is your total gross annual income?", options:[{l:"Less than $30,000",p:0},{l:"$30,000 to $59,999",p:1},{l:"$60,000 to $99,999",p:2},{l:"$100,000 to $149,999",p:3},{l:"Over $150,000",p:4}] },
+  { key:"q3", label:"3. What is your age?", options:[{l:"Under 40",p:6},{l:"41 - 54",p:4},{l:"55 - 64",p:2},{l:"65 or older",p:0}] },
+  { key:"q4", label:"4. What is your net estimated worth?", options:[{l:"Less than $50,000",p:0},{l:"$50,000 - $99,999",p:1},{l:"$100,000 - $249,999",p:2},{l:"$250,000 - $499,999",p:3},{l:"$500,000 or more",p:4}] },
+  { key:"q5", label:"5. What is your primary investment goal?", options:[{l:"Emergency or short-term needs.",p:0},{l:"Protecting my investment from short-term losses.",p:1},{l:"Earning some income and growing my investments over time.",p:2},{l:"Growing my investments over the long term.",p:3},{l:"Maximizing long-term growth.",p:4}] },
+  { key:"q6", label:"6. How would you classify your current financial situation?", options:[{l:"No savings and significant debt.",p:0},{l:"Little savings and a fair amount of debt.",p:1},{l:"Some savings and some debt.",p:2},{l:"Some savings and little to no debt.",p:3},{l:"Significant savings and little to no debt.",p:4}] },
+  { key:"q7", label:"7. What is your attitude toward market risk?", options:[{l:"I want my investments to be safe and have little to no risk.",p:0},{l:"I accept a low level of fluctuation for modest returns.",p:2},{l:"I accept moderate fluctuations for higher potential returns.",p:4},{l:"I accept significant fluctuations to maximize my returns.",p:6}] },
+  { key:"q8", label:"8. $100,000 invested becomes $70,000 after two years. What would you do?", options:[{l:"Sell: could not risk further losses.",p:0},{l:"Sell a portion: protect some capital.",p:2},{l:"Hold: markets fluctuate, re-evaluate in one year.",p:4},{l:"Buy more: prices have dropped.",p:6}] },
+  { key:"q9", label:"9. With $10,000 to invest, which range after one year would you choose?", options:[{l:"#1: $10,000-$10,200",p:0},{l:"#2: $9,600-$10,600",p:1},{l:"#3: $9,200-$11,000",p:2},{l:"#4: $8,400-$12,000",p:3},{l:"#5: $7,600-$13,000",p:4}] },
+  { key:"q10", label:"10. When do you plan to start actively withdrawing the money?", options:[{l:"Less than 3 years.",p:0},{l:"3 to 5 years.",p:2},{l:"6 to 10 years.",p:4},{l:"More than 10 years.",p:6}] },
+];
 const drawInsuranceQuestionnaireVector = (w, sf) => {
   const q = sf.insuranceQuestionnaire || {};
   if (sf.selectedInsuranceCompany === "Manulife") {
     const m = q.manulife || {};
-    drawQuestionnaireVector(w, "Manulife Investment Management - Investor Profile Questionnaire", "Segregated fund solutions", [
-      ["Salutation", m.salutation], ["Surname", m.surname], ["First Name", m.firstName], ["Initials", m.initials], ["Date Completed", fmtDate(m.dateCompleted)], ["Address", m.address], ["City", m.city], ["Province", m.province], ["Postal Code", m.postal], ["Home Tel", m.homePhone], ["Business Tel", m.businessPhone], ["Email", m.email], ["Household Income", m.householdIncome], ["Net Financial Assets (incl. spouse)", m.netFinancialAssets], ["Investor Experience", m.experience],
-    ], [
-      ["1. What is your investment horizon - when will you need this money?", m.q1], ["2. What is your most important investment goal?", m.q2], ["3. Please indicate which statement reflects your overall view of managing risk:", m.q3], ["4. If you owned an investment that declined by 20% over a short period, what would you do?", m.q4], ["5. If you could increase your chances of improving your investment returns by taking more risk, would you:", m.q5], ["6. Which model portfolio would you be most likely to hold?", m.q6], ["7. After several years of following your retirement plan, you review your progress and determine you are behind schedule. What would you do?", m.q7], ["8. Which statement best applies to your approach regarding achieving your retirement income goals on time?", m.q8],
-    ], [[`${m.firstName || ""} ${m.surname || ""}`.trim(), "Client"], ["Jie Yuan", "Advisor"]]);
+    const score = questionnaireScore(manulifeQuestions, m);
+    const profile = score === 0 ? "" : score <= 8 ? "Conservative" : score <= 23 ? "Moderate" : score <= 38 ? "Balanced" : "Growth";
+    w.addPage(); w.header("Manulife Investment Management - Investor Profile Questionnaire", "Segregated fund solutions", "Manulife Questionnaire");
+    w.section("Investor Information", () => w.fields([["Salutation", m.salutation], ["Surname", m.surname], ["First Name", m.firstName], ["Initials", m.initials], ["Date Completed", fmtDate(m.dateCompleted)], ["Address", m.address], ["City", m.city], ["Province", m.province], ["Postal Code", m.postal], ["Home Tel", m.homePhone], ["Business Tel", m.businessPhone], ["Email", m.email], ["Household Income", m.householdIncome], ["Net Financial Assets (incl. spouse)", m.netFinancialAssets], ["Investor Experience", m.experience]], 2));
+    w.section("Investor profile - answer all 8 questions", () => drawQuestionOptions(w, manulifeQuestions, m));
+    w.section("Investor Profile Result", () => drawProfileResult(w, [["Your total score", String(score)], ["My investor profile is", profile || " - "]], [["1-8", "Conservative", "Protecting your money is your chief concern."], ["9-23", "Moderate", "You want your money to grow, but are more concerned about protecting it."], ["24-38", "Balanced", "Balance between growth and security; will accept some risk."], ["39-64", "Growth", "You want to increase your money and can ride the ups and downs."]], ["Score range", "Profile", "Description"]));
+    w.section("Signatures", () => { w.signature(`${m.firstName || ""} ${m.surname || ""}`.trim(), "Client"); w.signature("Jie Yuan", "Advisor"); });
+    w.finishPage();
   }
   if (sf.selectedInsuranceCompany === "iA Financial") {
     const ia = q.iaFinancial || {};
-    drawQuestionnaireVector(w, "iA FINANCIAL - Your Investor Profile", "F51-122A", [["Application Type", ia.applicationType], ["NP Number", ia.npNumber], ["Existing Contract Number", ia.existingContract], ["Type of Registration", Object.keys(ia.registrationType || {}).filter(k => ia.registrationType[k]).join(", ")], ["Last and First Name", ia.lastFirstName], ["Date of Birth", fmtDate(ia.dateOfBirth)], ["Profession", ia.profession], ["Employer", ia.employer], ["Financial Objectives", ia.financialObjectives]], [["Q1. How old are you?", ia.q1], ["Q2. When do you plan to start withdrawing at least 25% of your savings?", ia.q2], ["Q3. Over the next five years, you plan to:", ia.q3], ["Q4. What is your gross annual income? (before taxes)", ia.q4], ["Q5. What is your net worth? (assets minus liabilities)", ia.q5], ["Q6. Indicate your level of tolerance toward investment risks.", ia.q6], ["Q7. After one year, in what range would you accept the final potential value of a $10,000 investment?", ia.q7], ["Q8. What is your level of knowledge about investments?", ia.q8], ["Choice of Investments", ia.choiceOfInvestments], ["Choice matches profile?", ia.choiceMatchesProfile]], [[ia.lastFirstName, "Client"], [ia.agentName || DEFAULT_ADVISOR_NAME, "Agent"]]);
+    const score = questionnaireScore(iaQuestions, ia);
+    const profile = score === 0 ? "" : score <= 26 ? "Prudent" : score <= 55 ? "Moderate" : score <= 89 ? "Balanced" : score <= 119 ? "Growth" : "Aggressive";
+    w.addPage(); w.header("iA FINANCIAL - Your Investor Profile", "F51-122A", "iA FINANCIAL Questionnaire");
+    w.section("Contract / Registration", () => w.fields([["Application Type", ia.applicationType], ["NP Number", ia.npNumber], ["Existing Contract Number", ia.existingContract], ["Type of Registration", Object.keys(ia.registrationType || {}).filter(k => ia.registrationType[k]).join(", ")]], 2));
+    w.section("Information", () => w.fields([["Last and First Name", ia.lastFirstName], ["Date of Birth", fmtDate(ia.dateOfBirth)], ["Profession", ia.profession], ["Employer", ia.employer], ["Employer Since", fmtDate(ia.employerSince)], ["Last Financial Planning", fmtDate(ia.lastFinPlanning)], ["Last Will/Estate Planning", fmtDate(ia.lastWillPlanning)], ["Financial Objectives", ia.financialObjectives]], 2));
+    w.section("Questionnaire", () => drawQuestionOptions(w, iaQuestions, ia));
+    w.section("Investor Profile Result", () => drawProfileResult(w, [["Total points", String(score)], ["Investor profile", profile || " - "]], [["From 8 to 26 points", "Prudent profile"], ["From 27 to 55 points", "Moderate profile"], ["From 56 to 89 points", "Balanced profile"], ["From 90 to 119 points", "Growth profile"], ["From 120 to 160 points", "Aggressive profile"]]));
+    w.section("Your investor profile results", () => {
+      w.longField("Choice of investments", ia.choiceOfInvestments, 18);
+      w.fields([["Does your choice correspond to your investor profile?", ia.choiceMatchesProfile], ["Signed in (city)", ia.signedIn], ["On (date)", fmtDate(ia.signedDate)]], 2);
+      if (ia.choiceMatchesProfile === "No") {
+        w.check(ia.reasonReducedFunds, "I wish to benefit from certain coverages. I understand that the choice of funds offered to me will be reduced and I accept that my investments will differ from those suggested by my profile.");
+        w.check(ia.reasonOther, `Other${ia.reasonOtherText ? ": " + ia.reasonOtherText : ""}`);
+        w.field("Client's initials", ia.clientInitials, 40);
+      }
+      w.textBlock("I have reviewed this investor profile, I recognize it is accurate and I confirm having received a copy of it.", { size: 8.8 });
+    });
+    w.section("Signatures", () => { w.signature(ia.lastFirstName, "Client"); w.signature(ia.agentName || DEFAULT_ADVISOR_NAME, "Agent"); w.initials("Client Initials"); });
+    w.finishPage();
   }
   if (sf.selectedInsuranceCompany === "Canada Life") {
     const c = q.canadaLife || {};
-    drawQuestionnaireVector(w, "Canada Life - Investment Personality Questionnaire", "Group wealth | Investments", [], [["1. What is the intent of your portfolio?", c.q1], ["2. What is your major goal for your portfolio?", c.q2], ["3. Which range includes your age?", c.q3], ["4. Current annual family income before taxes (including pensions):", c.q4], ["5. Immediate family's overall net worth after debts:", c.q5], ["6. When do you anticipate using these funds?", c.q6], ["7. At the time you need this money, when will you withdraw it?", c.q7], ["8. Intentions regarding withdrawals and/or contributions over the next five years?", c.q8], ["9. Which statement best describes your knowledge of investments?", c.q9], ["10. How long are you prepared to hold investments in anticipation of a recovery?", c.q10], ["11. Maximum drop in a $100,000 portfolio you could tolerate in any year:", c.q11], ["12. Which statement most correctly describes your investment philosophy?", c.q12], ["13. Which hypothetical portfolio would you prefer to invest in?", c.q13], ["14. Willingness to experience potentially large and frequent declines for higher long-term returns.", c.q14]], [[c.name, "Client"], ["Jie Yuan", "Advisor"]]);
+    const score = questionnaireScore(canadaQuestions, c);
+    const personality = score === 0 ? "" : score <= 105 ? "Conservative" : score <= 135 ? "Moderate" : score <= 164 ? "Balanced" : score <= 199 ? "Advanced" : "Aggressive";
+    const sectionTitles = { 1:"Section one - Investment objectives", 2:"Section two - Personal information", 3:"Section three - Investment horizons", 4:"Section four - Attitude towards risk", 5:"Section five - Portfolio volatility" };
+    w.addPage(); w.header("Canada Life - Investment Personality Questionnaire", "Group wealth | Investments", "Canada Life Questionnaire");
+    [1,2,3,4,5].forEach(sec => w.section(sectionTitles[sec], () => drawQuestionOptions(w, canadaQuestions.filter(question => question.sec === sec), c)));
+    w.section("Investment personality result", () => {
+      drawProfileResult(w, [["Final total", String(score)], ["Investment personality", personality || " - "]], [["105 or less", "Conservative"], ["106 to 135", "Moderate"], ["136 to 164", "Balanced"], ["165 to 199", "Advanced"], ["200 or more", "Aggressive"]]);
+      w.fields([["Name", c.name], ["Date", fmtDate(c.date)]], 2);
+    });
+    w.section("Signatures", () => { w.signature(c.name, "Client"); w.signature("Jie Yuan", "Advisor"); });
+    w.finishPage();
   }
   if (sf.selectedInsuranceCompany === "Equitable Life") {
     const e = q.equitableLife || {};
-    drawQuestionnaireVector(w, "Equitable Investor Profile Questionnaire", "", [], [["1. How would you describe your investment knowledge?", e.q1], ["2. What is your total gross annual income?", e.q2], ["3. What is your age?", e.q3], ["4. What is your net estimated worth?", e.q4], ["5. What is your primary investment goal?", e.q5], ["6. How would you classify your current financial situation?", e.q6], ["7. What is your attitude toward market risk?", e.q7], ["8. $100,000 invested becomes $70,000 after two years. What would you do?", e.q8], ["9. With $10,000 to invest, which range after one year would you choose?", e.q9], ["10. When do you plan to start actively withdrawing the money?", e.q10]], [[e.clientName, "Client"], ["Jie Yuan", "Advisor"]]);
+    const score = questionnaireScore(equitableQuestions, e);
+    const profile = score === 0 ? "" : score <= 7 ? "Minimal Risk" : score <= 16 ? "Conservative" : score <= 25 ? "Moderate Conservative" : score <= 34 ? "Balanced" : score <= 42 ? "Growth" : "Aggressive Growth";
+    w.addPage(); w.header("Equitable Investor Profile Questionnaire", "", "Equitable Questionnaire");
+    w.textBlock("Before you invest, it's important to understand your investor profile. This short questionnaire will help you identify your investment style - based on your goals, comfort with risk, and time horizon. Your results will point you to one of six investor styles, helping you choose a portfolio that best aligns with your needs.", { size: 8.6, lineH: 4.6 });
+    w.section("Investor Profile Questionnaire", () => drawQuestionOptions(w, equitableQuestions, e));
+    w.section("Investor Profile Result", () => {
+      drawProfileResult(w, [["Total Score", String(score)], ["Investor profile type", profile || " - "]], [["0-7", "Minimal Risk"], ["8-16", "Conservative"], ["17-25", "Moderate Conservative"], ["26-34", "Balanced"], ["35-42", "Growth"], ["43-50", "Aggressive Growth"]]);
+      w.field("Client Name", e.clientName, w.contentW);
+    });
+    w.section("Signatures", () => { w.signature(e.clientName, "Client"); w.signature("Jie Yuan", "Advisor"); });
+    w.finishPage();
   }
 };
 const drawLifeInsuranceVector = (w, li) => {
