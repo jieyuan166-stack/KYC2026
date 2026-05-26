@@ -4324,8 +4324,7 @@ const SendToAdobeSignModal = ({ open, onClose, data, getPdfBlob }) => {
       if (includeSpouse && client2Email.trim()) {
         signers.push({ email: client2Email.trim(), name: client2Name.trim() || "Client 2" });
       }
-      const dateStr = new Date().toISOString().split("T")[0];
-      const fileName = `Triton_${businessSlug.replace(/\s+/g, "_")}_${clientName.replace(/[^a-z0-9]/gi, "_")}_${dateStr}.pdf`;
+      const fileName = compliancePdfFileName(data);
       const agreementName = `Triton Compliance  -  ${clientName}  -  ${businessSlug}`;
 
       const res = await fetch(backendUrl.replace(/\/$/, "") + "/api/adobe-sign/send", {
@@ -4500,6 +4499,18 @@ const saveBlobAs = (blob, filename) => {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
+const safePdfFilePart = (value, fallback = "Client") => {
+  const cleaned = cleanPdfText(value || fallback)
+    .trim()
+    .replace(/[^a-z0-9]+/gi, "_")
+    .replace(/^_+|_+$/g, "");
+  return cleaned || fallback;
+};
+const compliancePdfFileName = (data) => {
+  const ad = data.advisorDisclosure || {};
+  const clientName = safePdfFilePart(ad.client1Name || ad.clientName || "Client");
+  return `Triton_KYC_AdvisorDisclosure_ReasonWhy_${clientName}_${todayISO()}.pdf`;
+};
 
 /* ============================================================
    REVIEW & GENERATE PDF
@@ -4529,11 +4540,7 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
       const pdf = await buildPdf();
       const reasonWhyForExport = makeReasonWhy(effectivePdfData.segregatedFundInvestment?.reasonWhy);
       const finalBlob = await mergePdfAttachment(pdf, reasonWhyForExport.attachment);
-      const clientName = data.advisorDisclosure.client1Name || data.advisorDisclosure.clientName || "client";
-      const safeName = clientName.replace(/[^a-z0-9]/gi, "_");
-      const dateStr = new Date().toISOString().split("T")[0];
-      const businessSlug = data.businessType === "Life Insurance" ? "Life_Insurance" : "Seg_Fund";
-      saveBlobAs(finalBlob, `Triton_${businessSlug}_${safeName}_${dateStr}.pdf`);
+      saveBlobAs(finalBlob, compliancePdfFileName(effectivePdfData));
     } catch (err) {
       alert("PDF generation failed: " + err.message);
     } finally {
