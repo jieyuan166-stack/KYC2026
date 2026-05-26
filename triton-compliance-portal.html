@@ -3516,6 +3516,8 @@ const PDF_VEC = {
   tableHeader: "#F3F1EA",
   panel: "#FBFAF7",
   highlight: "#FFF3B8",
+  signatureBox: "#FFF8D8",
+  dateBox: "#FFFFFF",
 };
 const cleanPdfText = (value) => {
   if (value === null || value === undefined || value === false) return "";
@@ -3560,6 +3562,8 @@ class PdfWriter {
     this.setMargin(margin);
     this.y = cover ? margin : margin + 8;
     if (!cover) {
+      this.pdf.setFillColor("#FFFFFF");
+      this.pdf.rect(0, 0, PDF_MM.w, PDF_MM.h, "F");
       this.pdf.setFillColor(PDF_VEC.gold);
       this.pdf.rect(0, 0, PDF_MM.w, 1.2, "F");
     }
@@ -3731,20 +3735,28 @@ class PdfWriter {
     this.pdf.text(lines, this.x + 3, this.y + 5);
     this.y += h + 6;
   }
-  table(headers, rows, widths = null) {
+  table(headers, rows, widths = null, options = {}) {
     const colW = widths || headers.map(() => this.contentW / headers.length);
+    const responseColumnIndex = Number.isInteger(options.responseColumnIndex) ? options.responseColumnIndex : -1;
+    const headerFill = options.headerFill || PDF_VEC.tableHeader;
+    const headerText = options.headerText || PDF_VEC.navy;
+    const responseFill = options.responseFill || "#FFFFFF";
+    const responseText = options.responseText || PDF_VEC.text;
     const drawHeader = () => {
       const headerLines = headers.map((h, i) => this.textLines(h, colW[i] - 3, 7.8));
       const headerH = Math.max(8.5, Math.max(...headerLines.map(lines => lines.length * 3.6 + 4.5)));
-      this.pdf.setFillColor(PDF_VEC.tableHeader);
       this.pdf.setDrawColor(PDF_VEC.creamDeep);
       let x = this.x;
       headers.forEach((h, i) => {
+        this.pdf.setFillColor(headerFill);
+        this.pdf.setDrawColor(PDF_VEC.creamDeep);
         this.pdf.rect(x, this.y, colW[i], headerH, "FD");
-        this.setFont(7.9, "bold", PDF_VEC.navy);
+        this.setFont(7.9, "bold", headerText);
         this.pdf.text(headerLines[i], x + 1.5, this.y + 4.8);
         x += colW[i];
       });
+      this.pdf.setFillColor("#FFFFFF");
+      this.pdf.setTextColor(PDF_VEC.text);
       this.y += headerH;
     };
     this.ensure(18);
@@ -3758,14 +3770,17 @@ class PdfWriter {
         drawHeader();
       }
       let x = this.x;
-      this.pdf.setFillColor(ri % 2 ? PDF_VEC.panel : "#FFFFFF");
       row.forEach((cell, i) => {
+        const isResponseCell = i === responseColumnIndex;
+        this.pdf.setFillColor(isResponseCell ? responseFill : (ri % 2 ? PDF_VEC.panel : "#FFFFFF"));
         this.pdf.setDrawColor(PDF_VEC.creamDeep);
         this.pdf.rect(x, this.y, colW[i], h, "FD");
-        this.setFont(8.3, "normal", PDF_VEC.text);
+        this.setFont(8.3, "normal", isResponseCell ? responseText : PDF_VEC.text);
         this.pdf.text(cellLines[i], x + 1.5, this.y + 5.4);
         x += colW[i];
       });
+      this.pdf.setFillColor("#FFFFFF");
+      this.pdf.setTextColor(PDF_VEC.text);
       this.y += h;
     });
     this.y += 6;
@@ -3775,13 +3790,18 @@ class PdfWriter {
     const x = this.x;
     this.setFont(7.6, "bold", PDF_VEC.soft);
     this.pdf.text(cleanPdfText(name || role), x, this.y);
-    this.pdf.setFillColor(PDF_VEC.highlight);
+    this.pdf.setFillColor(PDF_VEC.signatureBox);
     this.pdf.setDrawColor(PDF_VEC.gold);
     this.pdf.rect(x, this.y + 3, width, 12, "FD");
     this.setFont(8.2, "bold", PDF_VEC.navy);
     this.pdf.text(`${role} Signature`, x + 2, this.y + 10);
+    this.pdf.setFillColor(PDF_VEC.dateBox);
+    this.pdf.setDrawColor(PDF_VEC.gold);
     this.pdf.rect(x + width + 6, this.y + 3, 34, 12, "FD");
+    this.setFont(8.2, "bold", PDF_VEC.navy);
     this.pdf.text("Date", x + width + 8, this.y + 10);
+    this.pdf.setFillColor("#FFFFFF");
+    this.pdf.setTextColor(PDF_VEC.text);
     this.y += 21;
   }
   initials(label = "Client Initials") {
@@ -3925,7 +3945,13 @@ const drawNonLeverageVector = (w, nl) => {
 const drawQuestionnaireVector = (w, title, subtitle, infoFields, rows, signatures = []) => {
   w.addPage(); w.header(title, subtitle, title);
   if (infoFields?.length) w.section("Information", () => w.fields(infoFields, 2));
-  w.section("Questionnaire Responses", () => w.table(["Question", "Response"], pdfRows(rows), [w.contentW * 0.68, w.contentW * 0.32]));
+  w.section("Questionnaire Responses", () => w.table(["Question", "Response"], pdfRows(rows), [w.contentW * 0.68, w.contentW * 0.32], {
+    responseColumnIndex: 1,
+    responseFill: "#FFFFFF",
+    responseText: PDF_VEC.text,
+    headerFill: "#F7F5EE",
+    headerText: PDF_VEC.navy,
+  }));
   if (signatures.length) w.section("Signatures", () => signatures.forEach(sig => w.signature(sig[0], sig[1])));
   w.finishPage();
 };
