@@ -3504,7 +3504,7 @@ const PrintableDocument = ({ data }) => {
 const PDF_MM = { w: 215.9, h: 279.4 };
 const PDF_VEC = {
   margin: 15,
-  reasonMargin: 18,
+  reasonMargin: 16,
   footerY: 270,
   navy: NAVY,
   gold: GOLD,
@@ -3593,36 +3593,6 @@ class PdfWriter {
     this.ensure(lines.length * lineH + gap + 1);
     this.setFont(size, bold ? "bold" : "normal", color);
     this.pdf.text(lines, x, this.y, { align, maxWidth: width });
-    this.y += lines.length * lineH + gap;
-    return lines.length * lineH + gap;
-  }
-  drawJustifiedLine(line, x, y, width, size) {
-    const words = cleanPdfText(line).trim().split(/\s+/).filter(Boolean);
-    if (words.length < 4) {
-      this.pdf.text(line, x, y);
-      return;
-    }
-    const wordsWidth = words.reduce((sum, word) => sum + this.pdf.getTextWidth(word), 0);
-    const extra = (width - wordsWidth) / (words.length - 1);
-    if (!Number.isFinite(extra) || extra < 1.1 || extra > 4.2) {
-      this.pdf.text(line, x, y);
-      return;
-    }
-    let cursor = x;
-    words.forEach((word, idx) => {
-      this.pdf.text(word, cursor, y);
-      cursor += this.pdf.getTextWidth(word) + (idx === words.length - 1 ? 0 : extra);
-    });
-  }
-  textBlockJustified(text, { x = this.x, width = this.contentW, size = 9.8, lineH = 5.6, color = PDF_VEC.text, gap = 4.5, reasonTitle = "Reason Why Letter", reasonSubtitle = "" } = {}) {
-    const lines = this.textLines(text, width, size);
-    this.ensure(lines.length * lineH + gap + 1, { reason: true, reasonTitle, reasonSubtitle });
-    this.setFont(size, "normal", color);
-    lines.forEach((line, idx) => {
-      const isLast = idx === lines.length - 1;
-      if (isLast) this.pdf.text(line, x, this.y + idx * lineH);
-      else this.drawJustifiedLine(line, x, this.y + idx * lineH, width, size);
-    });
     this.y += lines.length * lineH + gap;
     return lines.length * lineH + gap;
   }
@@ -3764,22 +3734,24 @@ class PdfWriter {
   table(headers, rows, widths = null) {
     const colW = widths || headers.map(() => this.contentW / headers.length);
     const drawHeader = () => {
+      const headerLines = headers.map((h, i) => this.textLines(h, colW[i] - 3, 7.8));
+      const headerH = Math.max(8.5, Math.max(...headerLines.map(lines => lines.length * 3.6 + 4.5)));
       this.pdf.setFillColor(PDF_VEC.tableHeader);
       this.pdf.setDrawColor(PDF_VEC.creamDeep);
       let x = this.x;
       headers.forEach((h, i) => {
-        this.pdf.rect(x, this.y, colW[i], 7, "FD");
+        this.pdf.rect(x, this.y, colW[i], headerH, "FD");
         this.setFont(7.9, "bold", PDF_VEC.navy);
-        this.pdf.text(this.textLines(h, colW[i] - 3, 7.7), x + 1.5, this.y + 4.6);
+        this.pdf.text(headerLines[i], x + 1.5, this.y + 4.8);
         x += colW[i];
       });
-      this.y += 7;
+      this.y += headerH;
     };
-    this.ensure(16);
+    this.ensure(18);
     drawHeader();
     rows.forEach((row, ri) => {
       const cellLines = row.map((cell, i) => this.textLines(cleanPdfText(cell) || " ", colW[i] - 3, 8.3));
-      const h = Math.max(9, Math.max(...cellLines.map(lines => lines.length * 4.3 + 4.5)));
+      const h = Math.max(10, Math.max(...cellLines.map(lines => lines.length * 4.5 + 5.2)));
       if (this.y + h > 258) {
         this.finishPage();
         this.addPage();
@@ -3791,7 +3763,7 @@ class PdfWriter {
         this.pdf.setDrawColor(PDF_VEC.creamDeep);
         this.pdf.rect(x, this.y, colW[i], h, "FD");
         this.setFont(8.3, "normal", PDF_VEC.text);
-        this.pdf.text(cellLines[i], x + 1.5, this.y + 5);
+        this.pdf.text(cellLines[i], x + 1.5, this.y + 5.4);
         x += colW[i];
       });
       this.y += h;
@@ -4009,9 +3981,9 @@ const drawLifeInsuranceVector = (w, li) => {
   w.finishPage();
 };
 const reasonBlockHeight = (w, block) => {
-  const size = block.type === "heading" ? 10.5 : 9.6;
-  const lineH = block.type === "heading" ? 5 : 5.6;
-  return w.textLines(block.text, w.contentW, size).length * lineH + (block.type === "heading" ? 5 : 8);
+  const size = block.type === "heading" ? 10.2 : 9.25;
+  const lineH = block.type === "heading" ? 4.7 : 5.1;
+  return w.textLines(block.text, w.contentW, size).length * lineH + (block.type === "heading" ? 4 : 5.8);
 };
 const drawReasonWhyVector = (w, data, fromAttachment = false) => {
   const ctx = reasonWhyContext(data);
@@ -4031,8 +4003,8 @@ const drawReasonWhyVector = (w, data, fromAttachment = false) => {
       w.addPage({ margin: PDF_VEC.reasonMargin });
       w.reasonHeader("Reason Why Letter", subtitle, true);
     }
-    if (block.type === "heading") w.textBlock(block.text, { size: 10.5, lineH: 5, bold: true, gap: 3 });
-    else w.textBlockJustified(block.text, { size: 9.7, lineH: 5.6, gap: 4.6, reasonSubtitle: subtitle });
+    if (block.type === "heading") w.textBlock(block.text, { size: 10.2, lineH: 4.7, bold: true, gap: 2.5 });
+    else w.textBlock(block.text, { size: 9.25, lineH: 5.1, gap: 3.2 });
   }
   if (w.y + 34 > 258) {
     w.finishPage();
@@ -4040,8 +4012,8 @@ const drawReasonWhyVector = (w, data, fromAttachment = false) => {
     w.reasonHeader("Reason Why Letter", subtitle, true);
   }
   if (!hasClientAcknowledgement(rawBlocks)) {
-    w.textBlock("Client Acknowledgement", { size: 10, bold: true, gap: 3 });
-    w.textBlockJustified(CLIENT_ACK_TEXT, { size: 9.6, lineH: 5.5, gap: 5, reasonSubtitle: subtitle });
+    w.textBlock("Client Acknowledgement", { size: 10, bold: true, gap: 2.5 });
+    w.textBlock(CLIENT_ACK_TEXT, { size: 9.2, lineH: 5.0, gap: 3.2 });
   }
   w.signature(ctx.clientName, "Client");
   w.finishPage();
