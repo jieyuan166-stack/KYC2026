@@ -3583,11 +3583,14 @@ class PdfWriter {
   logoData() {
     return (typeof window !== "undefined" && (window.TRITON_LOGO_STACK || window.TRITON_LOGO_COVER || window.TRITON_LOGO)) || "";
   }
-  drawLogo(x, y, width = 17, height = 17) {
-    const logo = this.logoData();
+  coverLogoData() {
+    return (typeof window !== "undefined" && (window.TRITON_LOGO_COVER || window.TRITON_LOGO || window.TRITON_LOGO_STACK)) || "";
+  }
+  drawLogo(x, y, width = 17, height = 17, variant = "stack") {
+    const logo = variant === "cover" ? this.coverLogoData() : this.logoData();
     if (!logo) return;
     try {
-      this.pdf.addImage(logo, "PNG", x, y, width, height, "triton-logo", "FAST");
+      this.pdf.addImage(logo, "PNG", x, y, width, height, `triton-logo-${variant}`, "FAST");
     } catch (err) {
       // Keep PDF export working even if a viewer rejects the embedded image.
     }
@@ -3617,29 +3620,30 @@ class PdfWriter {
     this.addPage({ cover: true, margin: 16 });
     this.pdf.setFillColor(PDF_VEC.navy);
     this.pdf.rect(0, 0, PDF_MM.w, PDF_MM.h, "F");
-    this.drawLogo(16, 16, 24, 24);
+    this.drawLogo(14, 16, 86, 24.9, "cover");
     this.pdf.setFillColor(PDF_VEC.gold);
-    this.pdf.rect(16, 38, 20, 0.8, "F");
+    this.pdf.rect(16, 58, 18, 0.7, "F");
     this.setFont(10, "normal", PDF_VEC.cream);
-    this.pdf.text("COMPLIANCE DOCUMENTATION PACKAGE", 16, 48);
+    this.pdf.text("COMPLIANCE DOCUMENTATION PACKAGE", 16, 71);
     this.setFont(26, "bold", "#FFFFFF");
-    this.pdf.text(this.textLines(data.businessType || "Compliance File", 150, 26), 16, 64);
+    this.pdf.text(this.textLines(data.businessType || "Compliance File", 150, 26), 16, 88);
     this.setFont(11, "normal", PDF_VEC.cream);
-    this.pdf.text("For client signature and advisor records", 16, 82);
+    this.pdf.text("For client signature & advisor records", 16, 99);
     this.setFont(8.5, "bold", "#DAD3C4");
-    this.pdf.text("PRODUCT / ACCOUNT TYPE", 16, 101);
+    this.pdf.text("PRODUCT / ACCOUNT TYPE", 16, 112);
     this.setFont(14, "bold", "#FFFFFF");
-    this.pdf.text(this.textLines(coverProductType(data), 165, 14), 16, 110);
+    this.pdf.text(this.textLines(coverProductType(data), 165, 14), 16, 123);
     this.pdf.setDrawColor(PDF_VEC.gold);
-    this.pdf.line(16, 202, 200, 202);
+    this.pdf.setLineWidth(0.25);
+    this.pdf.line(16, 231, 200, 231);
     const client = ad.client1Name || ad.clientName || "Client";
     const date = new Date().toLocaleDateString("en-CA", { year: "numeric", month: "long", day: "numeric" });
-    this.coverMeta("Client", client, 16, 216);
-    this.coverMeta("Date Prepared", date, 112, 216);
-    this.coverMeta("Advisor", "Jie Yuan\nIndependent Advisor", 16, 238);
-    this.coverMeta("Firm", "Triton Wealth Management Corp.\nMGA: Citistar Financial Services Ltd.", 112, 238);
-    this.setFont(8, "normal", "#D5CEBF");
-    this.pdf.text("#1200 1200 W 73rd Ave Vancouver, BC V6P 6G5 - (778) 837-6688", 108, 265, { align: "center" });
+    this.coverMeta("Client", client, 16, 242);
+    this.coverMeta("Date Prepared", date, 112, 242);
+    this.coverMeta("Advisor", "Jie Yuan\nIndependent Advisor", 16, 258);
+    this.coverMeta("Firm", "Triton Wealth Management Corp.\nMGA: Citistar Financial Services Ltd.", 112, 258);
+    this.pdf.setDrawColor(PDF_VEC.gold);
+    this.pdf.line(16, 273, 200, 273);
   }
   coverMeta(label, value, x, y) {
     this.setFont(8, "bold", "#D5CEBF");
@@ -3648,11 +3652,26 @@ class PdfWriter {
     this.pdf.text(cleanPdfText(value).split("\n"), x, y + 7);
   }
   header(title, subtitle = "", pageLabel = "") {
-    this.ensure(24);
-    this.drawLogo(this.margin, this.y - 4, 17, 17);
+    this.ensure(40);
+    const topY = Math.max(16, this.y - 2);
+    this.drawLogo(this.margin + 2, topY, 22, 22.2);
+    this.setFont(8.5, "bold", PDF_VEC.navy);
+    this.pdf.text("Jie Yuan", PDF_MM.w - this.margin, topY + 4.5, { align: "right" });
+    this.pdf.text("INDEPENDENT ADVISOR", PDF_MM.w - this.margin, topY + 9, { align: "right" });
+    this.pdf.setDrawColor(PDF_VEC.gold);
+    this.pdf.setLineWidth(0.35);
+    this.pdf.line(PDF_MM.w - this.margin - 24, topY + 10.8, PDF_MM.w - this.margin, topY + 10.8);
+    this.setFont(7.5, "normal", PDF_VEC.soft);
+    this.pdf.text("#1200 1200 W 73rd Ave", PDF_MM.w - this.margin, topY + 18, { align: "right" });
+    this.pdf.text("Vancouver, BC V6P 6G5", PDF_MM.w - this.margin, topY + 22, { align: "right" });
+    this.pdf.text("Phone: (778) 837-6688", PDF_MM.w - this.margin, topY + 26, { align: "right" });
+    this.pdf.setDrawColor(PDF_VEC.soft);
+    this.pdf.setLineWidth(0.25);
+    this.pdf.line(this.margin, topY + 32, PDF_MM.w - this.margin, topY + 32);
+    this.y = topY + 40;
     this.setFont(7.5, "bold", PDF_VEC.soft);
     if (pageLabel) this.pdf.text(cleanPdfText(pageLabel).toUpperCase(), PDF_MM.w - this.margin, this.y, { align: "right" });
-    this.y += pageLabel ? 6 : 2;
+    this.y += pageLabel ? 8 : 4;
     this.setFont(16, "bold", PDF_VEC.navy);
     this.pdf.text(this.textLines(title, this.contentW, 16), PDF_MM.w / 2, this.y, { align: "center" });
     this.y += 7;
@@ -3677,15 +3696,13 @@ class PdfWriter {
   }
   section(title, fn, minHeight = 18) {
     this.ensure(minHeight + 12);
-    this.pdf.setDrawColor(PDF_VEC.gold);
-    this.pdf.setLineWidth(0.6);
-    this.pdf.line(this.x, this.y - 1.5, this.x, this.y + 5.5);
-    this.setFont(10.2, "bold", PDF_VEC.navy);
-    this.pdf.text(cleanPdfText(title), this.x + 3.2, this.y + 3.5);
-    this.pdf.setDrawColor(PDF_VEC.creamDeep);
-    this.pdf.setLineWidth(0.2);
-    this.pdf.line(this.x + 3.2, this.y + 6.4, this.x + this.contentW, this.y + 6.4);
-    this.y += 12;
+    this.pdf.setFillColor(PDF_VEC.navy);
+    this.pdf.rect(this.x, this.y - 1.5, this.contentW, 8.5, "F");
+    this.pdf.setFillColor(PDF_VEC.gold);
+    this.pdf.rect(this.x, this.y - 1.5, 0.8, 8.5, "F");
+    this.setFont(10.2, "bold", "#FFFFFF");
+    this.pdf.text(cleanPdfText(title), this.x + 4.2, this.y + 4);
+    this.y += 12.5;
     fn();
     this.y += 5;
   }
