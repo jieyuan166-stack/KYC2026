@@ -3580,6 +3580,18 @@ class PdfWriter {
   finishPage() {
     this.footer();
   }
+  logoData() {
+    return (typeof window !== "undefined" && (window.TRITON_LOGO_STACK || window.TRITON_LOGO_COVER || window.TRITON_LOGO)) || "";
+  }
+  drawLogo(x, y, width = 17, height = 17) {
+    const logo = this.logoData();
+    if (!logo) return;
+    try {
+      this.pdf.addImage(logo, "PNG", x, y, width, height, "triton-logo", "FAST");
+    } catch (err) {
+      // Keep PDF export working even if a viewer rejects the embedded image.
+    }
+  }
   ensure(height, opts = {}) {
     const bottom = opts.reason ? 264 : 258;
     if (this.y + height <= bottom) return;
@@ -3605,6 +3617,7 @@ class PdfWriter {
     this.addPage({ cover: true, margin: 16 });
     this.pdf.setFillColor(PDF_VEC.navy);
     this.pdf.rect(0, 0, PDF_MM.w, PDF_MM.h, "F");
+    this.drawLogo(16, 16, 24, 24);
     this.pdf.setFillColor(PDF_VEC.gold);
     this.pdf.rect(16, 38, 20, 0.8, "F");
     this.setFont(10, "normal", PDF_VEC.cream);
@@ -3636,6 +3649,7 @@ class PdfWriter {
   }
   header(title, subtitle = "", pageLabel = "") {
     this.ensure(24);
+    this.drawLogo(this.margin, this.y - 4, 17, 17);
     this.setFont(7.5, "bold", PDF_VEC.soft);
     if (pageLabel) this.pdf.text(cleanPdfText(pageLabel).toUpperCase(), PDF_MM.w - this.margin, this.y, { align: "right" });
     this.y += pageLabel ? 6 : 2;
@@ -3653,6 +3667,7 @@ class PdfWriter {
   }
   reasonHeader(title, subtitle, continued = false) {
     this.ensure(26);
+    this.drawLogo(this.margin, this.y - 4, 17, 17);
     this.setFont(15, "bold", PDF_VEC.text);
     this.pdf.text(title, PDF_MM.w / 2, this.y, { align: "center" });
     this.y += 6.5;
