@@ -4534,7 +4534,21 @@ const buildVectorPdf = async (data) => {
   if (isSegFund) {
     const rw = makeReasonWhy(sf.reasonWhy);
     if (reasonWhyHasAttachment(rw) && rw.attachment.kind === "docx" && hasText(rw.attachment.text)) drawReasonWhyVector(w, data, true);
-    if (!reasonWhyHasAttachment(rw) && rw.accountType && hasText(rw.body)) drawReasonWhyVector(w, data, false);
+    if (!reasonWhyHasAttachment(rw) && rw.accountType) {
+      let reasonWhyData = data;
+      if (!hasText(rw.body)) {
+        reasonWhyData = deepClone(data);
+        const generatedReasonWhy = {
+          ...rw,
+          include: true,
+          body: generateReasonWhyBody(reasonWhyData),
+          generatedAccountType: rw.accountType,
+        };
+        reasonWhyData.segregatedFundInvestment.reasonWhy = generatedReasonWhy;
+        generatedReasonWhy.sourceSnapshot = reasonWhySourceSnapshot(reasonWhyData);
+      }
+      drawReasonWhyVector(w, reasonWhyData, false);
+    }
   }
   if (isLifeIns) drawLifeInsuranceVector(w, data.lifeInsurance.needsAnalysis || {});
   return pdf;
