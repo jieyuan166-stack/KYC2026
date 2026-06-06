@@ -378,7 +378,40 @@ const AUTH_CUSTOM_PASSWORD_HASH_KEY = "triton_kyc_custom_password_hash_v1";
 const AUTH_PASSWORD_HASH = "b4d892dcdd1c8a38a97f6cfcac5bf20075d10947cd9cde9d41e18d2bb2f216d9";
 const STORAGE_KEY_LEGACY = "triton_compliance_draft_v1";   // single object (kept for migration)
 const STORAGE_KEY        = "triton_compliance_drafts_v2";  // array of drafts
-const DEFAULT_ADVISOR_NAME = "Jie Yuan";
+const ADVISOR_PROFILE_KEY = "triton_active_advisor_profile_v1";
+const ADVISOR_PROFILES = {
+  jie: {
+    key: "jie",
+    advisorName: "Jie Yuan",
+    advisorDisplayName: "Jie Jeffrey Yuan",
+    firmName: "Triton Wealth Management Corp.",
+    brandName: "Triton Wealth Management",
+    coverBrandLine: "富瑞财富 · MGA: Citistar Financial Services Ltd.",
+    headerRole: "Independent Advisor",
+    addressLines: ["#1200 1200 W 73rd Ave", "Vancouver, BC V6P 6G5"],
+    phone: "(778) 837-6688",
+    showLogo: true,
+    showChineseBrand: true,
+  },
+  shiyun: {
+    key: "shiyun",
+    advisorName: "Shiyun Qiu",
+    advisorDisplayName: "Shiyun Qiu",
+    firmName: "2142759 Alberta Ltd.",
+    brandName: "2142759 Alberta Ltd.",
+    coverBrandLine: "",
+    headerRole: "Independent Advisor",
+    addressLines: [],
+    phone: "",
+    showLogo: false,
+    showChineseBrand: false,
+  },
+};
+const DEFAULT_ADVISOR_PROFILE_KEY = "jie";
+const getAdvisorProfile = (key) => ADVISOR_PROFILES[key] || ADVISOR_PROFILES[DEFAULT_ADVISOR_PROFILE_KEY];
+const DEFAULT_ADVISOR_NAME = ADVISOR_PROFILES.jie.advisorName;
+const advisorNameValues = () => Object.values(ADVISOR_PROFILES).map(p => p.advisorName);
+const shouldReplaceAdvisorValue = (value) => !hasText(value) || advisorNameValues().includes(String(value).trim());
 const REASON_WHY_ACCOUNT_OPTIONS = [
   { value: "RRSP", label: "RRSP" },
   { value: "FHSA", label: "FHSA" },
@@ -414,10 +447,10 @@ const saveDraftsList = (drafts) => {
 };
 
 const makeId = () => "d_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
-const makeDraft = (formData) => ({
+const makeDraft = (formData, advisorProfileKey = DEFAULT_ADVISOR_PROFILE_KEY) => ({
   id: makeId(),
   currentStep: 0,
-  formData: normalizeFormData(formData ? deepClone(formData) : deepClone(initialFormDataRef.current)),
+  formData: normalizeFormData(formData ? deepClone(formData) : { ...deepClone(initialFormDataRef.current), advisorProfileKey }),
   updatedAt: Date.now(),
   createdAt: Date.now(),
 });
@@ -565,6 +598,8 @@ const makeReasonWhy = (row = {}) => {
 
 function normalizeFormData(formData) {
   const fd = deepClone(formData || initialFormDataRef.current || {});
+  fd.advisorProfileKey = fd.advisorProfileKey || DEFAULT_ADVISOR_PROFILE_KEY;
+  const profile = getAdvisorProfile(fd.advisorProfileKey);
   fd.smartFill = fd.smartFill || { manual: {}, lastPrimaryName: "", lastSpouseName: "" };
   fd.smartFill.manual = fd.smartFill.manual || {};
   fd.advisorDisclosure = fd.advisorDisclosure || {};
@@ -590,12 +625,12 @@ function normalizeFormData(formData) {
     ].filter(Boolean);
     lc.netWorth.otherItems = ensureRows(lc.netWorth.otherItems || legacyNetWorthRows, makeNetWorthOtherRow);
     lc.debt = ensureRows((lc.debt || []).map(makeDebtRow), makeDebtRow);
-    if (!hasText(lc.advisorNameAck)) lc.advisorNameAck = DEFAULT_ADVISOR_NAME;
+    if (shouldReplaceAdvisorValue(lc.advisorNameAck)) lc.advisorNameAck = profile.advisorName;
   }
 
   const iq = fd.segregatedFundInvestment?.insuranceQuestionnaire;
-  if (iq?.iaFinancial && !hasText(iq.iaFinancial.agentName)) {
-    iq.iaFinancial.agentName = DEFAULT_ADVISOR_NAME;
+  if (iq?.iaFinancial && shouldReplaceAdvisorValue(iq.iaFinancial.agentName)) {
+    iq.iaFinancial.agentName = profile.advisorName;
   }
 
   const li = fd.lifeInsurance?.needsAnalysis;
@@ -611,10 +646,22 @@ function normalizeFormData(formData) {
       ? [makeOtherLiquidRow({ marketValue: li.liquidAssets.otherMV, loan: li.liquidAssets.otherLoan })]
       : null;
     li.liquidAssets.otherItems = ensureRows(li.liquidAssets.otherItems || legacyLiquidRows, makeOtherLiquidRow);
-    if (!hasText(li.advisorName)) li.advisorName = DEFAULT_ADVISOR_NAME;
+    if (shouldReplaceAdvisorValue(li.advisorName)) li.advisorName = profile.advisorName;
   }
   return fd;
 }
+
+const applyAdvisorProfileToFormData = (formData, profileKey) => {
+  const profile = getAdvisorProfile(profileKey);
+  const next = normalizeFormData({ ...deepClone(formData || {}), advisorProfileKey: profileKey });
+  const lc = next.segregatedFundInvestment?.leverageCompliance;
+  if (lc && shouldReplaceAdvisorValue(lc.advisorNameAck)) lc.advisorNameAck = profile.advisorName;
+  const ia = next.segregatedFundInvestment?.insuranceQuestionnaire?.iaFinancial;
+  if (ia && shouldReplaceAdvisorValue(ia.agentName)) ia.agentName = profile.advisorName;
+  const li = next.lifeInsurance?.needsAnalysis;
+  if (li && shouldReplaceAdvisorValue(li.advisorName)) li.advisorName = profile.advisorName;
+  return next;
+};
 
 /* placeholder filled below after initialFormData is declared */
 const initialFormDataRef = { current: null };
@@ -678,6 +725,7 @@ const formatDraftTimestamp = (ts) => {
    INITIAL FORM DATA
    ============================================================ */
 const initialFormData = {
+  advisorProfileKey: DEFAULT_ADVISOR_PROFILE_KEY,
   advisorDisclosure: {
     clientName: "",
     spouseConsent: false,
@@ -899,8 +947,13 @@ const buildSteps = (data) => {
 /* ============================================================
    STEP: ADVISOR DISCLOSURE
    ============================================================ */
-const AdvisorDisclosureForm = ({ data, update }) => {
+const AdvisorDisclosureForm = ({ data, update, profile = ADVISOR_PROFILES.jie }) => {
   const d = data.advisorDisclosure;
+  const isShiyun = profile.key === "shiyun";
+  const advisorLine = `${profile.advisorName}, ${profile.headerRole}, ${profile.firmName}`;
+  const carriers = isShiyun
+    ? ["CANADA LIFE", "MANULIFE", "SUN LIFE", "EQUITABLE LIFE", "iA FINANCIAL", "DESJARDINS", "BMO INSURANCE", "FORESTERS", "CPP", "TUGO"]
+    : ["CANADA LIFE", "MANULIFE", "SUN LIFE", "EQUITABLE LIFE", "iA FINANCIAL"];
   const set = (k, v) => update("advisorDisclosure", { ...d, [k]: v });
   const setAcknowledgementName = (v) => {
     const previousAckName = d.clientName || "";
@@ -929,11 +982,11 @@ const AdvisorDisclosureForm = ({ data, update }) => {
   return (
     <div className="space-y-6">
       <header className="text-center pb-4 border-b border-gray-200">
-        <div className="text-sm text-gray-600 italic">Jie Yuan / Triton Wealth Management Corporation</div>
-        <div className="text-sm text-gray-600">#1200 1200 W 73rd Ave Vancouver, BC V6P 6G5</div>
-        <div className="text-sm text-gray-600">Phone: (778) 837-6688</div>
+        <div className="text-sm text-gray-600 italic">{profile.advisorName} / {profile.firmName}</div>
+        {profile.addressLines.map(line => <div key={line} className="text-sm text-gray-600">{line}</div>)}
+        {profile.phone && <div className="text-sm text-gray-600">Phone: {profile.phone}</div>}
         <h2 className="text-2xl font-bold text-navy mt-4">Insurance Disclosure and Privacy Consent</h2>
-        <div className="text-sm text-gray-700 mt-1">&lt;Jie Yuan&gt;, &lt;Independent Advisor&gt;, &lt;Triton Wealth Management Corporation&gt;</div>
+        <div className="text-sm text-gray-700 mt-1">{advisorLine}</div>
       </header>
 
       <section>
@@ -942,28 +995,34 @@ const AdvisorDisclosureForm = ({ data, update }) => {
         <p className="text-sm text-gray-700">I am licensed as a life and health insurance agent in following province:</p>
         <p className="text-sm font-semibold underline italic mt-1">AB, BC and ON</p>
         <p className="text-sm text-gray-700 mt-3">I am also licensed/registered in the following fields:</p>
-        <p className="text-sm font-semibold underline italic mt-1">Mutual Funds &amp; Exempt market business in AB and BC, contracting through Portfolio Strategies Corporation.</p>
+        <p className="text-sm font-semibold underline italic mt-1">
+          {isShiyun
+            ? "Exempt market business in BC and AB, contracting through Enoch Wealth Inc."
+            : "Mutual Funds & Exempt market business in AB and BC, contracting through Portfolio Strategies Corporation."}
+        </p>
       </section>
 
       <section>
         <h4 className="font-semibold text-navy mt-3">Companies I represent</h4>
-        <p className="text-sm text-gray-700">I represent the following insurers to market their products which include life insurance, critical illness insurance, disability insurance, travel insurance, group insurance, and segregated funds through Citistar Financial Services Ltd., a Managing General Agency (MGA):</p>
+        <p className="text-sm text-gray-700">
+          I represent the following insurers to market their products which include life insurance, critical illness insurance, disability insurance, travel insurance, group insurance, and segregated funds{isShiyun ? ":" : " through Citistar Financial Services Ltd., a Managing General Agency (MGA):"}
+        </p>
         <table className="kyc-table mt-2 max-w-md">
           <thead><tr><th>Name of Business / Insurance Carriers</th></tr></thead>
           <tbody>
-            <tr><td>CANADA LIFE</td></tr>
-            <tr><td>MANULIFE</td></tr>
-            <tr><td>SUN LIFE</td></tr>
-            <tr><td>EQUITABLE LIFE</td></tr>
-            <tr><td>iA FINANCIAL</td></tr>
+            {carriers.map(carrier => <tr key={carrier}><td>{carrier}</td></tr>)}
           </tbody>
         </table>
-        <p className="text-sm text-gray-700 mt-3">For my other occupation, I have a business relationship with <em><b>1264670 BC Ltd. and J Yuan Holding Ltd.</b></em> Under this arrangement, I provide <em><b>Mutual Funds &amp; Exempt market services through 1264670 BC Ltd.</b></em> Compensation for these services is <b>commission-based.</b> I have an ownership interest <em><b>in both 1264670 BC Ltd. and J Yuan Holding Ltd.</b></em> My involvement in the other business includes <em><b>providing mutual fund services through 1264670 BC Ltd. and holding business assets under J Yuan Holding Ltd.,</b></em> which functions solely as a holding company.</p>
+        {!isShiyun && (
+          <p className="text-sm text-gray-700 mt-3">For my other occupation, I have a business relationship with <em><b>1264670 BC Ltd. and J Yuan Holding Ltd.</b></em> Under this arrangement, I provide <em><b>Mutual Funds &amp; Exempt market services through 1264670 BC Ltd.</b></em> Compensation for these services is <b>commission-based.</b> I have an ownership interest <em><b>in both 1264670 BC Ltd. and J Yuan Holding Ltd.</b></em> My involvement in the other business includes <em><b>providing mutual fund services through 1264670 BC Ltd. and holding business assets under J Yuan Holding Ltd.,</b></em> which functions solely as a holding company.</p>
+        )}
       </section>
 
       <section>
         <h4 className="font-semibold text-navy mt-3">Nature of relationship with insurance company(ies) I represent</h4>
-        <p className="text-sm text-gray-700">In the event that you decide to purchase life insurance products through me, you understand that life insurance products purchased are separate from and not contingent on activities involving <em><b>Mutual Funds &amp; Exempt market services.</b></em> Furthermore, no Insurer holds ownership interest in <em><b>Jie Yuan/Triton Wealth Management Corporation</b></em>, and <em><b>Jie Yuan/Triton Wealth Management Corporation</b></em> does not hold an ownership interest in any Insurer.</p>
+        <p className="text-sm text-gray-700">
+          In the event that you decide to purchase life insurance products through me, you understand that life insurance products purchased are separate from and not contingent on activities involving <em><b>{isShiyun ? "Exempt market business." : "Mutual Funds & Exempt market services."}</b></em> Furthermore, no Insurer holds ownership interest in <em><b>{profile.advisorName}/{profile.firmName}</b></em>, and <em><b>{profile.advisorName}/{profile.firmName}</b></em> does not hold an ownership interest in any Insurer.
+        </p>
         <p className="text-sm text-gray-700 mt-2">I will notify you immediately of any other existing or perceived conflict of interest that may relate to any life insurance recommendation that I make if they arise.</p>
       </section>
 
@@ -975,7 +1034,11 @@ const AdvisorDisclosureForm = ({ data, update }) => {
 
       <section>
         <h4 className="font-semibold text-navy mt-3">Potential conflict or conflict of interest</h4>
-        <p className="text-sm text-gray-700">My position/profession as a <em><b>business owner of 1264670 BC Ltd and J Yuan holding Ltd.</b></em> may be perceived to be a potential conflict of interest with respect to my recommendations to you. However, I confirm that my recommendations will be based solely on my assessment of your needs.</p>
+        <p className="text-sm text-gray-700">
+          {isShiyun
+            ? "I have no actual or potential conflict of interest that would influence my recommendations to you. If any conflict or perceived conflict arises, I will disclose it to you promptly."
+            : <span>My position/profession as a <em><b>business owner of 1264670 BC Ltd and J Yuan holding Ltd.</b></em> may be perceived to be a potential conflict of interest with respect to my recommendations to you. However, I confirm that my recommendations will be based solely on my assessment of your needs.</span>}
+        </p>
       </section>
 
       <section>
@@ -999,7 +1062,7 @@ const AdvisorDisclosureForm = ({ data, update }) => {
 
       <section>
         <h4 className="font-semibold text-navy mt-3">Compliance with Canadian Anti-Spam Law and its Regulations (CASL)</h4>
-        <p className="text-sm text-gray-700">I consent to receiving electronic communications from <em><b>Jie Yuan</b></em> about my insurance and/or investment needs and coverage and information about products and services that might benefit me. I understand that I may withdraw my consent at any time.</p>
+        <p className="text-sm text-gray-700">I consent to receiving electronic communications from <em><b>{profile.advisorName}</b></em> about my insurance and/or investment needs and coverage and information about products and services that might benefit me. I understand that I may withdraw my consent at any time.</p>
         <p className="text-sm text-gray-700 mt-2"><b>By signing below, you give your consent to collect and maintain your personal information in your client file and consent to receiving electronic communications.</b></p>
       </section>
 
@@ -2657,11 +2720,16 @@ const reasonWhyContext = (data) => {
   const ad = data.advisorDisclosure || {};
   const nl = sf.nonLeverageCompliance || {};
   const lc = sf.leverageCompliance || {};
+  const profile = getAdvisorProfile(data.advisorProfileKey);
   const clientName = fullClientName(ad) || nl.clientNames || lc.clientNameAck || "Client";
   const client2Name = (ad.client2Name || lc.jointNameAck || "").trim();
   const amountRaw = sf.leverageLoan === "yes" ? lc.principalLoan : nl.amountToInvest;
   return {
+    profileKey: profile.key,
     company: companyDisplayName(sf.selectedInsuranceCompany),
+    advisorName: profile.advisorName,
+    firmName: profile.firmName,
+    brandName: profile.brandName,
     accountType: normalizeReasonWhyAccountType(sf.reasonWhy?.accountType),
     accountLabel: reasonWhyLabel(sf.reasonWhy?.accountType),
     date: fmtLongDate(todayISO()),
@@ -2686,20 +2754,38 @@ const reasonWhySourceSnapshot = (data) => {
     investmentAmount: ctx.investmentAmount,
     date: ctx.date,
     guaranteeWording: ctx.guaranteeWording,
+    advisorName: ctx.advisorName,
+    firmName: ctx.firmName,
   };
 };
 const sameReasonWhySnapshot = (a, b) => JSON.stringify(a || null) === JSON.stringify(b || null);
+const normalizeAdvisorBrandText = (text, data) => {
+  const ctx = reasonWhyContext(data);
+  if (ctx.profileKey !== "shiyun") return String(text || "");
+  return String(text || "")
+    .replace(/\bJie Jeffrey Yuan\b/g, ctx.advisorName)
+    .replace(/\bJie Yuan\b/g, ctx.advisorName)
+    .replace(/\bTriton Wealth Management Corporation\b/g, ctx.firmName)
+    .replace(/\bTriton Wealth Management Corp\.\b/g, ctx.firmName)
+    .replace(/\bTriton Wealth Management Corp\b/g, ctx.firmName)
+    .replace(/\bTriton Wealth Management\b/g, ctx.brandName)
+    .replace(/富瑞财富\s*·\s*MGA:\s*Citistar Financial Services Ltd\./g, ctx.firmName)
+    .replace(/富瑞财富/g, ctx.firmName);
+};
 const applyReasonWhyTokens = (text, data) => {
   const ctx = reasonWhyContext(data);
   const replacements = {
     COMPANY: ctx.company,
     DATE: ctx.date,
     CLIENT_NAME: ctx.clientName,
+    ADVISOR_NAME: ctx.advisorName,
+    FIRM_NAME: ctx.firmName,
+    BRAND_NAME: ctx.brandName,
     INVESTMENT_AMOUNT: ctx.investmentAmount,
     MATURITY_GUARANTEE: ctx.maturityGuarantee === "contractual" ? "contractual maturity guarantee" : `${ctx.maturityGuarantee}% Maturity Guarantee`,
     DEATH_BENEFIT_GUARANTEE: ctx.deathBenefitGuarantee === "contractual" ? "contractual death benefit guarantee" : `${ctx.deathBenefitGuarantee}% Death Benefit Guarantee`,
   };
-  return String(text || "").replace(/\{\{\s*([A-Z0-9_]+)\s*\}\}/g, (_, key) => replacements[key] || "");
+  return normalizeAdvisorBrandText(String(text || "").replace(/\{\{\s*([A-Z0-9_]+)\s*\}\}/g, (_, key) => replacements[key] || ""), data);
 };
 const stripTemplatePlaceholders = (text) => String(text || "")
   .replace(/\{\{[^}]+\}\}/g, "")
@@ -2719,7 +2805,7 @@ const generateReasonWhyBody = (data) => {
     "Non-Registered": `REASON WHY LETTER\n${ctx.company} Segregated Fund Contract - Non-Registered\n${ctx.date}\n\nDear ${greetingName},\n\nRecommendation\nBased on our recent meeting and the financial needs analysis we completed together, I am recommending that you establish a Non-Registered account under a segregated fund contract with ${ctx.company}. The contribution amount is ${ctx.investmentAmount}.\n\nYour Stated Needs & Objectives\nDuring our recent meeting, we reviewed your overall financial situation, long-term goals, and your comfort level with investment risk. Your primary objectives are to continue building investment wealth beyond registered accounts, protect those assets through an insurance-contract structure where applicable, and manage the tax impact of investment growth.\n\nHow This Recommendation Meets Your Needs\nThe ${ctx.company} Non-Registered segregated fund contract addresses these objectives in ways that traditional non-registered accounts may not. Investment growth may include capital gains, interest, dividends, or other allocations, and tax treatment will depend on the nature of the income allocated and your personal tax situation. Based on your investment horizon and risk tolerance, we selected a diversified portfolio of segregated funds aligned with your long-term wealth-building objectives.\n\n${investmentStrategyDisclosure}\n\n${commonDisclosure}\n\nAlternatives Considered\nWe discussed traditional non-registered mutual fund accounts, GICs, and direct ownership of securities. The segregated fund contract was recommended because it provides insurance-contract features in addition to the maturity and death benefit guarantees that ordinary investment accounts do not provide.\n\n${commonClose}`,
     "Spousal RRSP": `REASON WHY LETTER\n${ctx.company} Segregated Fund Contract - Spousal RRSP\n${ctx.date}\n\nDear ${greetingName},\n\nRecommendation\nBased on our recent meeting and the financial needs analysis we completed together, I am recommending that ${ctx.householdName || ctx.clientName} establish a Spousal Registered Retirement Savings Plan (Spousal RRSP) under a segregated fund contract with ${ctx.company}. The contribution amount is ${ctx.investmentAmount}.\n\nYour Stated Needs & Objectives\nDuring our recent meeting, we reviewed your household's overall financial situation, long-term retirement goals, and risk tolerance as a couple. Your primary objectives are to build retirement savings, support future retirement income planning between spouses, protect the invested capital, and maintain an insurance-contract structure.\n\nHow This Recommendation Meets Your Needs\nA Spousal RRSP allows a household to direct retirement savings toward a spouse and may support future retirement income planning. Based on your household retirement time horizon and risk tolerance, we selected a diversified portfolio of segregated funds aligned with your long-term planning objectives.\n\nThree-Year Attribution Rule\nI have explained that under the Income Tax Act, if funds are withdrawn from a Spousal RRSP in the same calendar year a contribution is made or in either of the two following calendar years, the withdrawn amount, up to the amount of contributions made in that period, may be attributed back to the contributor and taxed in the contributor's hands. We have reviewed the intended contribution and withdrawal timing with this rule in mind.\n\n${investmentStrategyDisclosure}\n\n${commonDisclosure}\n\nAlternatives Considered\nWe discussed each spouse contributing separately to individual RRSPs and using future retirement income planning strategies. The Spousal RRSP was recommended because it can provide additional household retirement planning flexibility while adding segregated fund contract features.\n\n${commonClose}`,
   };
-  return stripTemplatePlaceholders(templates[ctx.accountType] || "");
+  return normalizeAdvisorBrandText(stripTemplatePlaceholders(templates[ctx.accountType] || ""), data);
 };
 
 /* ============================================================
@@ -3532,9 +3618,10 @@ const cleanPdfText = (value) => {
     .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, "");
 };
 class PdfWriter {
-  constructor(pdf, fontName = "helvetica") {
+  constructor(pdf, fontName = "helvetica", profile = ADVISOR_PROFILES.jie) {
     this.pdf = pdf;
     this.font = fontName;
+    this.profile = profile;
     this.page = 0;
     this.margin = PDF_VEC.margin;
     this.x = this.margin;
@@ -3572,8 +3659,9 @@ class PdfWriter {
     this.pdf.setLineWidth(0.2);
     this.pdf.line(this.margin, PDF_VEC.footerY - 4, PDF_MM.w - this.margin, PDF_VEC.footerY - 4);
     this.setFont(7.5, "normal", "#7A8292");
-    this.pdf.text("Triton Wealth Management", this.margin, PDF_VEC.footerY);
-    this.pdf.text("#1200 1200 W 73rd Ave Vancouver, BC - (778) 837-6688", PDF_MM.w - this.margin, PDF_VEC.footerY, { align: "right" });
+    this.pdf.text(this.profile.brandName, this.margin, PDF_VEC.footerY);
+    const contact = [...(this.profile.addressLines || []), this.profile.phone ? `Phone: ${this.profile.phone}` : ""].filter(Boolean).join(" - ");
+    if (contact) this.pdf.text(contact, PDF_MM.w - this.margin, PDF_VEC.footerY, { align: "right" });
   }
   finishPage() {
     this.footer();
@@ -3585,6 +3673,7 @@ class PdfWriter {
     return (typeof window !== "undefined" && (window.TRITON_LOGO_COVER || window.TRITON_LOGO || window.TRITON_LOGO_STACK)) || "";
   }
   drawLogo(x, y, width = 17, height = 17, variant = "stack") {
+    if (!this.profile.showLogo) return;
     const logo = variant === "cover" ? this.coverLogoData() : this.logoData();
     if (!logo) return;
     try {
@@ -3617,10 +3706,15 @@ class PdfWriter {
   }
   cover(data) {
     const ad = data.advisorDisclosure || {};
+    const profile = this.profile;
     this.addPage({ cover: true, margin: 16 });
     this.pdf.setFillColor(PDF_VEC.navy);
     this.pdf.rect(0, 0, PDF_MM.w, PDF_MM.h, "F");
-    this.drawLogo(14, 16, 86, 24.9, "cover");
+    if (profile.showLogo) this.drawLogo(14, 16, 86, 24.9, "cover");
+    else {
+      this.setFont(20, "bold", "#FFFFFF");
+      this.pdf.text(profile.firmName, 16, 28);
+    }
     this.pdf.setFillColor(PDF_VEC.gold);
     this.pdf.rect(16, 58, 18, 0.7, "F");
     this.setFont(10, "normal", PDF_VEC.cream);
@@ -3640,8 +3734,8 @@ class PdfWriter {
     const date = new Date().toLocaleDateString("en-CA", { year: "numeric", month: "long", day: "numeric" });
     this.coverMeta("Client", client, 16, 242);
     this.coverMeta("Date Prepared", date, 112, 242);
-    this.coverMeta("Advisor", "Jie Yuan", 16, 258);
-    this.coverMeta("Firm", "Triton Wealth Management Corp.", 112, 258);
+    this.coverMeta("Advisor", profile.advisorName, 16, 258);
+    this.coverMeta("Firm", profile.firmName, 112, 258);
     this.pdf.setDrawColor(PDF_VEC.gold);
     this.pdf.line(16, 273, 200, 273);
   }
@@ -3655,18 +3749,22 @@ class PdfWriter {
     this.ensure(40);
     this.currentHeader = { kind: "standard", title, subtitle, pageLabel };
     const topY = Math.max(16, this.y - 2);
+    const profile = this.profile;
     this.drawLogo(this.margin + 2, topY, 22, 22.2);
+    if (!profile.showLogo) {
+      this.setFont(9, "bold", PDF_VEC.navy);
+      this.pdf.text(profile.firmName, this.margin + 2, topY + 9);
+    }
     this.setFont(10, "bold", PDF_VEC.navy);
-    this.pdf.text("Jie Yuan", PDF_MM.w - this.margin, topY + 4.5, { align: "right" });
+    this.pdf.text(profile.advisorName, PDF_MM.w - this.margin, topY + 4.5, { align: "right" });
     this.setFont(7, "bold", PDF_VEC.navy);
-    this.pdf.text("INDEPENDENT ADVISOR", PDF_MM.w - this.margin, topY + 9, { align: "right" });
+    this.pdf.text(profile.headerRole.toUpperCase(), PDF_MM.w - this.margin, topY + 9, { align: "right" });
     this.pdf.setDrawColor(PDF_VEC.gold);
     this.pdf.setLineWidth(0.35);
     this.pdf.line(PDF_MM.w - this.margin - 24, topY + 10.8, PDF_MM.w - this.margin, topY + 10.8);
     this.setFont(7.5, "normal", PDF_VEC.soft);
-    this.pdf.text("#1200 1200 W 73rd Ave", PDF_MM.w - this.margin, topY + 18, { align: "right" });
-    this.pdf.text("Vancouver, BC V6P 6G5", PDF_MM.w - this.margin, topY + 22, { align: "right" });
-    this.pdf.text("Phone: (778) 837-6688", PDF_MM.w - this.margin, topY + 26, { align: "right" });
+    const lines = [...(profile.addressLines || []), profile.phone ? `Phone: ${profile.phone}` : ""];
+    lines.forEach((line, idx) => this.pdf.text(line, PDF_MM.w - this.margin, topY + 18 + idx * 4, { align: "right" }));
     this.pdf.setDrawColor(PDF_VEC.soft);
     this.pdf.setLineWidth(0.25);
     this.pdf.line(this.margin, topY + 32, PDF_MM.w - this.margin, topY + 32);
@@ -3910,7 +4008,58 @@ class PdfWriter {
   }
 }
 const pdfRows = (rows) => rows.map(row => row.map(cell => cleanPdfText(cell)));
-const drawAdvisorDisclosureVector = (w, ad) => {
+const drawShiyunAdvisorDisclosureVector = (w, ad, profile) => {
+  w.addPage(); w.header("Insurance Disclosure and Privacy Consent", `${profile.advisorName}, Independent Advisor, ${profile.firmName}`, "Page 1 of 3");
+  w.section("Insurance Disclosure - About me", () => {
+    w.textBlock("I am licensed as a life and health insurance agent in following province:");
+    w.textBlock("AB, BC and ON", { bold: true });
+    w.textBlock("I am also licensed/registered in the following fields:");
+    w.textBlock("Exempt market business in BC and AB, contracting through Enoch Wealth Inc.", { bold: true });
+  });
+  w.section("Companies I represent", () => {
+    w.textBlock("I represent the following insurers to market their products which include life insurance, critical illness insurance, disability insurance, travel insurance, group insurance, and segregated funds through Citistar Financial Services Ltd., a Managing General Agency (MGA):");
+    w.table(["Name of Business / Insurance Carriers"], [["CANADA LIFE"], ["MANULIFE"], ["SUN LIFE"], ["EQUITABLE LIFE"], ["iA FINANCIAL"], ["DESJARDINS"], ["BMO INSURANCE"], ["FORESTERS"], ["CPP"], ["TUGO"]]);
+  });
+  w.section("Nature of relationship with insurance company(ies) I represent", () => {
+    w.textBlock("In the event that you decide to purchase life insurance products through me, you understand that life insurance products purchased are separate from and not contingent on activities involving Exempt market services. Furthermore, no Insurer holds ownership interest in Shiyun Qiu/2142759 Alberta Ltd., and Shiyun Qiu/2142759 Alberta Ltd. does not hold an ownership interest in any Insurer.");
+    w.textBlock("I will notify you immediately of any other existing or perceived conflict of interest that may relate to any life insurance recommendation that I make if they arise.");
+  });
+  w.finishPage();
+  w.addPage(); w.header("Insurance Disclosure and Privacy Consent", "", "Page 2 of 3");
+  w.section("Insurance Compensation", () => {
+    w.textBlock("I am compensated by sales commission on policies I sell and may receive a renewal (or service) commission on policies that remain active. Commissions are paid by the insurance company that provides the product you purchased. For certain products I may receive a referral fee.");
+    w.textBlock("I may be eligible for additional compensation and other benefits, such as bonuses and professional conferences which may be based on my sales reaching a certain level. I may also be entitled to participate in a share purchase plan.");
+  });
+  w.section("Potential conflict or conflict of interest", () => w.textBlock("I confirm that I have no conflict of interest. If I become aware of a potential conflict I will tell you."));
+  w.section("More information", () => w.textBlock("If you need more information about my qualifications or my business relationships, please let me know."));
+  w.section("Privacy commitment and your client file", () => {
+    w.textBlock("Protecting the privacy of your personal information is important to me and the companies whose products and services I offer, and I'm committed to collecting, using and disclosing your personal information responsibly. The personal information being collected, such as contact information, financial information, medical information, as well as records of meetings and phone calls, general correspondence and any instructions you provide to me, will be maintained by me or at my direction in paper and/or electronic format in a client file. This information will be used to assess your financial situation, offer products and services that may be of interest and benefit to you, and provide ongoing client service.");
+    w.textBlock("Your personal information in your client file will be disclosed ONLY to:");
+    w.textBlock("- Me or my firm's employees, my MGA - Citistar Financial and employees and persons authorized by me or by my firm;", { size: 9 });
+    w.textBlock("- Companies whose products and services I offer and their employees and agents, for the purpose of, or relating to, their providing or seeking to provide financial products or services to you and for any other purposes you have authorized;", { size: 9 });
+    w.textBlock("- Persons or entities to which you have granted access or that are allowed access by law.", { size: 9 });
+  });
+  w.finishPage();
+  w.addPage(); w.header("Insurance Disclosure and Privacy Consent", "", "Page 3 of 3");
+  w.section("Privacy commitment and your client file - continued", () => {
+    w.textBlock("In accordance with applicable law and by your written request, you have the right to: review the personal information in your client file, request corrections to this information, and to revoke your consent subject to contractual limitations.");
+    w.textBlock("If requested by you, additional personal documents such as copies of insurance policies, wills and powers of attorney may be kept in your client file.");
+    w.textBlock("If you need more information about my privacy policies and/or those of the companies I represent, please let me know.");
+  });
+  w.section("Compliance with Canadian Anti-Spam Law and its Regulations (CASL)", () => {
+    w.textBlock("I consent to receiving electronic communications from Shiyun Qiu about my insurance and/or investment needs and coverage and information about products and services that might benefit me. I understand that I may withdraw my consent at any time.");
+    w.textBlock("By signing below, you give your consent to collect and maintain your personal information in your client file and consent to receiving electronic communications.", { bold: true });
+  });
+  w.section("Acknowledgment and Consent", () => {
+    w.textBlock(`I, ${ad.clientName || ad.client1Name || "________________"} (Client Name) acknowledge that I have reviewed this document. I understand any conflicts of interest or potential conflicts of interest outlined in this document. I also consent to a client file being created and maintained for me.`);
+    w.check(ad.spouseConsent, "I consent to my personal information being maintained in a joint client file with my spouse and being disclosed to my spouse. (Requires signature of spouse, if selected.)");
+    w.signature(ad.client1Name || ad.clientName, "Client 1");
+    if (ad.client2Name || ad.spouseConsent) w.signature(ad.client2Name, "Client 2");
+  });
+  w.finishPage();
+};
+const drawAdvisorDisclosureVector = (w, ad, profile) => {
+  if (profile.key === "shiyun") return drawShiyunAdvisorDisclosureVector(w, ad, profile);
   w.addPage(); w.header("Insurance Disclosure and Privacy Consent", "Jie Yuan, Independent Advisor, Triton Wealth Management Corp.", "Page 1 of 3");
   w.section("Insurance Disclosure - About me", () => {
     w.textBlock("I am licensed as a life and health insurance agent in following province:");
@@ -3996,7 +4145,7 @@ const drawLeverageVector = (w, lc) => {
       ["Tax Considerations", "You should not borrow to invest just to receive a tax deduction. Interest costs are not always tax deductible. Consult a tax professional to determine whether your interest costs will be deductible before borrowing to invest."],
     ].forEach(([h, t]) => { w.textBlock(`${h}: ${t}`, { size: 8.5 }); w.initials(); });
   });
-  w.section("Client and Advisor Acknowledgement", () => { w.textBlock("I/We have reviewed this Leveraging Analysis & Disclosure with our advisor, and understand the material features and risks involved with this leveraging strategy."); w.signature(lc.clientNameAck, "Client"); if (lc.jointNameAck) w.signature(lc.jointNameAck, "Joint Applicant"); w.signature(lc.advisorNameAck || "Jie Yuan", "Advisor"); });
+  w.section("Client and Advisor Acknowledgement", () => { w.textBlock("I/We have reviewed this Leveraging Analysis & Disclosure with our advisor, and understand the material features and risks involved with this leveraging strategy."); w.signature(lc.clientNameAck, "Client"); if (lc.jointNameAck) w.signature(lc.jointNameAck, "Joint Applicant"); w.signature(lc.advisorNameAck || w.profile.advisorName, "Advisor"); });
   w.finishPage();
 };
 const drawNonLeverageVector = (w, nl) => {
@@ -4023,7 +4172,7 @@ const drawNonLeverageVector = (w, nl) => {
     w.textBlock("Fee structure", { bold: true, size: 9 }); w.check(nl.feeStructure.frontEnd, "Front-end load"); w.check(nl.feeStructure.dsc, "Deferred sales charge"); w.check(nl.feeStructure.lowLoad, "Low-load deferred sales charge"); w.check(nl.feeStructure.other, `Other${nl.feeStructure.otherText ? ": " + nl.feeStructure.otherText : ""}`);
     w.longField("Support and rationale of fund selection / risk profile / fee structure", nl.rationale, 28);
   });
-  w.section("Acknowledgement", () => { w.textBlock("I/We have reviewed this Sales Suitability Summary with my advisor and confirm the information above is accurate."); w.signature(nl.clientNames, "Client(s)"); w.signature("Jie Yuan", "Advisor"); });
+  w.section("Acknowledgement", () => { w.textBlock("I/We have reviewed this Sales Suitability Summary with my advisor and confirm the information above is accurate."); w.signature(nl.clientNames, "Client(s)"); w.signature(w.profile.advisorName, "Advisor"); });
   w.finishPage();
 };
 const normalizeChoice = (value) => cleanPdfText(value).replace(/\s+/g, " ").trim();
@@ -4113,7 +4262,7 @@ const drawInsuranceQuestionnaireVector = (w, sf) => {
     w.section("Investor Information", () => w.fields([["Salutation", m.salutation], ["Surname", m.surname], ["First Name", m.firstName], ["Initials", m.initials], ["Date Completed", fmtDate(m.dateCompleted)], ["Address", m.address], ["City", m.city], ["Province", m.province], ["Postal Code", m.postal], ["Home Tel", m.homePhone], ["Business Tel", m.businessPhone], ["Email", m.email], ["Household Income", m.householdIncome], ["Net Financial Assets (incl. spouse)", m.netFinancialAssets], ["Investor Experience", m.experience]], 2));
     w.section("Investor profile - answer all 8 questions", () => drawQuestionOptions(w, manulifeQuestions, m));
     w.section("Investor Profile Result", () => drawProfileResult(w, [["Your total score", String(score)], ["My investor profile is", profile || " - "]], [["1-8", "Conservative", "Protecting your money is your chief concern."], ["9-23", "Moderate", "You want your money to grow, but are more concerned about protecting it."], ["24-38", "Balanced", "Balance between growth and security; will accept some risk."], ["39-64", "Growth", "You want to increase your money and can ride the ups and downs."]], ["Score range", "Profile", "Description"]));
-    w.section("Signatures", () => { w.signature(`${m.firstName || ""} ${m.surname || ""}`.trim(), "Client"); w.signature("Jie Yuan", "Advisor"); });
+    w.section("Signatures", () => { w.signature(`${m.firstName || ""} ${m.surname || ""}`.trim(), "Client"); w.signature(w.profile.advisorName, "Advisor"); });
     w.finishPage();
   }
   if (sf.selectedInsuranceCompany === "iA Financial") {
@@ -4135,7 +4284,7 @@ const drawInsuranceQuestionnaireVector = (w, sf) => {
       }
       w.textBlock("I have reviewed this investor profile, I recognize it is accurate and I confirm having received a copy of it.", { size: 8.8 });
     });
-    w.section("Signatures", () => { w.signature(ia.lastFirstName, "Client"); w.signature(ia.agentName || DEFAULT_ADVISOR_NAME, "Agent"); w.initials("Client Initials"); });
+    w.section("Signatures", () => { w.signature(ia.lastFirstName, "Client"); w.signature(ia.agentName || w.profile.advisorName, "Agent"); w.initials("Client Initials"); });
     w.finishPage();
   }
   if (sf.selectedInsuranceCompany === "Canada Life") {
@@ -4149,7 +4298,7 @@ const drawInsuranceQuestionnaireVector = (w, sf) => {
       drawProfileResult(w, [["Final total", String(score)], ["Investment personality", personality || " - "]], [["105 or less", "Conservative"], ["106 to 135", "Moderate"], ["136 to 164", "Balanced"], ["165 to 199", "Advanced"], ["200 or more", "Aggressive"]]);
       w.fields([["Name", c.name], ["Date", fmtDate(c.date)]], 2);
     });
-    w.section("Signatures", () => { w.signature(c.name, "Client"); w.signature("Jie Yuan", "Advisor"); });
+    w.section("Signatures", () => { w.signature(c.name, "Client"); w.signature(w.profile.advisorName, "Advisor"); });
     w.finishPage();
   }
   if (sf.selectedInsuranceCompany === "Equitable Life") {
@@ -4163,7 +4312,7 @@ const drawInsuranceQuestionnaireVector = (w, sf) => {
       drawProfileResult(w, [["Total Score", String(score)], ["Investor profile type", profile || " - "]], [["0-7", "Minimal Risk"], ["8-16", "Conservative"], ["17-25", "Moderate Conservative"], ["26-34", "Balanced"], ["35-42", "Growth"], ["43-50", "Aggressive Growth"]]);
       w.prominentField("Client Name", e.clientName, w.contentW);
     });
-    w.section("Signatures", () => { w.signature(e.clientName, "Client"); w.signature("Jie Yuan", "Advisor"); });
+    w.section("Signatures", () => { w.signature(e.clientName, "Client"); w.signature(w.profile.advisorName, "Advisor"); });
     w.finishPage();
   }
 };
@@ -4192,7 +4341,7 @@ const drawLifeInsuranceVector = (w, li) => {
   w.summary("Maximum CI Coverage", fmtMoney(maxCI)); w.summary("Maximum Life Coverage", fmtMoney(maxLife)); w.summary("New CI Coverage", fmtMoney(li.newCoverageCI)); w.summary("New Life Coverage", fmtMoney(li.newCoverageLife));
   w.section("Coverage Calculation", () => w.table(["Item", "Parameter", "Max. CI Coverage", "Max. Life Coverage"], pdfRows([["Critical Illness - Replace Income", `${li.ciIncomeMultiple || "0"} x earned income`, fmtMoney(earned*num(li.ciIncomeMultiple)), ""], ["Critical Illness - Mortgage Protection", `Mortgage: ${fmtMoney(li.ciMortgage)}`, fmtMoney(li.ciMortgage), ""], ["Life Insurance - Replace Income", `${li.lifeIncomeMultiple || "0"} x earned income`, "", fmtMoney(earned*num(li.lifeIncomeMultiple))], ["Life Insurance - Mortgage Protection", `Mortgage: ${fmtMoney(li.lifeMortgage)}`, "", fmtMoney(li.lifeMortgage)], ["Maximum Coverage", "", fmtMoney(maxCI), fmtMoney(maxLife)], ["In-force Coverage", "", fmtMoney(li.inForceCI), fmtMoney(li.inForceLife)], ["New Coverage to be Placed", "", fmtMoney(li.newCoverageCI), fmtMoney(li.newCoverageLife)]])));
   w.section("Premium Suitability", () => w.summary("Annual Premium", fmtMoney(li.annualPremium)));
-  w.section("Signatures", () => { w.textBlock("I/We confirm that the information presented in this Insurance Needs Analysis has been reviewed with my/our advisor and is accurate to the best of my/our knowledge."); w.signature(li.policyOwnerName || li.clientName, "Policy Owner"); w.signature(li.advisorName || "Jie Yuan", "Advisor"); });
+  w.section("Signatures", () => { w.textBlock("I/We confirm that the information presented in this Insurance Needs Analysis has been reviewed with my/our advisor and is accurate to the best of my/our knowledge."); w.signature(li.policyOwnerName || li.clientName, "Policy Owner"); w.signature(li.advisorName || w.profile.advisorName, "Advisor"); });
   w.finishPage();
 };
 const reasonBlockHeight = (w, block) => {
@@ -4203,7 +4352,8 @@ const reasonBlockHeight = (w, block) => {
 const drawReasonWhyVector = (w, data, fromAttachment = false) => {
   const ctx = reasonWhyContext(data);
   const rw = makeReasonWhy(data.segregatedFundInvestment?.reasonWhy);
-  const rawBlocks = fromAttachment ? withClientAcknowledgement(stripReasonWhyLeadingTitles(letterBodyBlocks(rw.attachment.text), ctx)) : stripReasonWhyLeadingTitles(reasonWhyBodyBlocks(rw.body), ctx);
+  const reasonText = fromAttachment ? normalizeAdvisorBrandText(rw.attachment.text, data) : normalizeAdvisorBrandText(rw.body, data);
+  const rawBlocks = fromAttachment ? withClientAcknowledgement(stripReasonWhyLeadingTitles(letterBodyBlocks(reasonText), ctx)) : stripReasonWhyLeadingTitles(reasonWhyBodyBlocks(reasonText), ctx);
   if (!rawBlocks.length) return;
   const subtitle = reasonWhyContractSubtitle(ctx);
   w.addPage({ margin: PDF_VEC.reasonMargin });
@@ -4371,12 +4521,13 @@ const collectMissingItems = (data) => {
 const buildVectorPdf = async (data) => {
   const { jsPDF } = window.jspdf;
   const pdf = new jsPDF("p", "mm", "letter");
-  const w = new PdfWriter(pdf, "helvetica");
+  const profile = getAdvisorProfile(data.advisorProfileKey);
+  const w = new PdfWriter(pdf, "helvetica", profile);
   const sf = data.segregatedFundInvestment || {};
   const isSegFund = data.businessType === "Segregated Fund Investment";
   const isLifeIns = data.businessType === "Life Insurance";
   w.cover(data);
-  drawAdvisorDisclosureVector(w, data.advisorDisclosure || {});
+  drawAdvisorDisclosureVector(w, data.advisorDisclosure || {}, profile);
   if (isSegFund && sf.leverageLoan === "yes") drawLeverageVector(w, sf.leverageCompliance || {});
   if (isSegFund && sf.leverageLoan === "no") drawNonLeverageVector(w, sf.nonLeverageCompliance || {});
   if (isSegFund) drawInsuranceQuestionnaireVector(w, sf);
@@ -4404,6 +4555,7 @@ const confirmMissingItemsBeforeExport = (items) => {
    ADOBE SIGN SEND MODAL
    ============================================================ */
 const SendToAdobeSignModal = ({ open, onClose, data, getPdfBlob }) => {
+  const profile = getAdvisorProfile(data.advisorProfileKey);
   const [backendUrl, setBackendUrl] = useState(() => {
     const savedUrl = localStorage.getItem(ADOBE_SIGN_BACKEND_KEY);
     if (savedUrl) return savedUrl;
@@ -4411,12 +4563,12 @@ const SendToAdobeSignModal = ({ open, onClose, data, getPdfBlob }) => {
     return "http://localhost:3000";
   });
   const [advisorEmail, setAdvisorEmail] = useState("");
-  const [advisorName, setAdvisorName] = useState("Jie Yuan");
+  const [advisorName, setAdvisorName] = useState(() => profile.advisorName);
   const [client1Email, setClient1Email] = useState("");
   const [client1Name, setClient1Name] = useState(data.advisorDisclosure.client1Name || "");
   const [client2Email, setClient2Email] = useState("");
   const [client2Name, setClient2Name] = useState(data.advisorDisclosure.client2Name || "");
-  const [message, setMessage] = useState("Please review and sign  -  Triton Wealth Management.");
+  const [message, setMessage] = useState(() => `Please review and sign - ${profile.brandName}.`);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
@@ -4440,13 +4592,15 @@ const SendToAdobeSignModal = ({ open, onClose, data, getPdfBlob }) => {
 
   useEffect(() => {
     if (open) {
+      setAdvisorName(profile.advisorName);
+      setMessage(`Please review and sign - ${profile.brandName}.`);
       setClient1Name(data.advisorDisclosure.client1Name || "");
       setClient2Name(data.advisorDisclosure.client2Name || "");
       setResult(null);
       setError("");
       checkServerStatus(backendUrl);
     }
-  }, [open]);
+  }, [open, data.advisorProfileKey]);
 
   if (!open) return null;
 
@@ -4474,7 +4628,7 @@ const SendToAdobeSignModal = ({ open, onClose, data, getPdfBlob }) => {
         signers.push({ email: client2Email.trim(), name: client2Name.trim() || "Client 2" });
       }
       const fileName = compliancePdfFileName(data);
-      const agreementName = `Triton Compliance  -  ${clientName}  -  ${businessSlug}`;
+      const agreementName = `${profile.brandName} Compliance - ${clientName} - ${businessSlug}`;
 
       const res = await fetch(backendUrl.replace(/\/$/, "") + "/api/adobe-sign/send", {
         method: "POST",
@@ -4657,8 +4811,10 @@ const safePdfFilePart = (value, fallback = "Client") => {
 };
 const compliancePdfFileName = (data) => {
   const ad = data.advisorDisclosure || {};
+  const profile = getAdvisorProfile(data.advisorProfileKey);
+  const prefix = profile.key === "shiyun" ? "2142759_KYC" : "Triton_KYC";
   const clientName = safePdfFilePart(ad.client1Name || ad.clientName || "Client");
-  return `Triton_KYC_AdvisorDisclosure_ReasonWhy_${clientName}_${todayISO()}.pdf`;
+  return `${prefix}_AdvisorDisclosure_ReasonWhy_${clientName}_${todayISO()}.pdf`;
 };
 
 /* ============================================================
@@ -4711,6 +4867,7 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
   const reasonWhy = makeReasonWhy(sf.reasonWhy);
   const hasReasonWhyAttachment = reasonWhyHasAttachment(reasonWhy);
   const effectivePdfData = effectiveReasonWhyData(data);
+  const profile = getAdvisorProfile(effectivePdfData.advisorProfileKey);
   const missingItems = collectMissingItems(effectivePdfData);
   const setReasonWhy = (patch) => update("segregatedFundInvestment", {
     ...sf,
@@ -4822,8 +4979,10 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
 
       <div className="pdf-section space-y-4">
         <div className="text-center border-b border-gray-300 pb-3">
-          <div className="text-xl font-bold text-navy">Triton Wealth Management Corporation</div>
-          <div className="text-xs text-gray-600">#1200 1200 W 73rd Ave Vancouver, BC V6P 6G5 · (778) 837-6688</div>
+          <div className="text-xl font-bold text-navy">{profile.firmName}</div>
+          {(profile.addressLines.length || profile.phone) && (
+            <div className="text-xs text-gray-600">{[...profile.addressLines, profile.phone && `Phone: ${profile.phone}`].filter(Boolean).join(" · ")}</div>
+          )}
           <div className="text-lg font-semibold text-navy mt-2">Compliance File  -  {data.businessType || " - "}</div>
           <div className="text-xs text-gray-500">Generated: {new Date().toLocaleString()}</div>
         </div>
@@ -4850,7 +5009,7 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
           )}
         </ReviewPanel>
 
-        <ReviewPanel title="1. TRITON Advisor Disclosure & Privacy Commitment">
+        <ReviewPanel title={`1. ${profile.key === "shiyun" ? "2142759" : "TRITON"} Advisor Disclosure & Privacy Commitment`}>
           <ReviewSummaryRow label="Client name (acknowledgment)" value={ad.clientName} />
           <ReviewSummaryRow label="Joint client file consent" value={ad.spouseConsent ? "Yes" : "No"} />
           <ReviewSummaryRow label="Client 1" value={`${ad.client1Name}${ad.client1Date ? " · "+ad.client1Date : ""}`} />
@@ -4904,7 +5063,7 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
         {isSegFund && (
           <ReviewPanel title={`4. Insurance Company Questionnaire  -  ${sf.selectedInsuranceCompany === "iA Financial" ? "iA FINANCIAL" : (sf.selectedInsuranceCompany || " - ")}`}>
             {sf.selectedInsuranceCompany === "Manulife" && <ManulifeReview d={sf.insuranceQuestionnaire.manulife}/>}
-            {sf.selectedInsuranceCompany === "iA Financial" && <IAReview d={sf.insuranceQuestionnaire.iaFinancial}/>}
+            {sf.selectedInsuranceCompany === "iA Financial" && <IAReview d={sf.insuranceQuestionnaire.iaFinancial} profile={profile}/>}
             {sf.selectedInsuranceCompany === "Canada Life" && <CanadaLifeReview d={sf.insuranceQuestionnaire.canadaLife}/>}
             {sf.selectedInsuranceCompany === "Equitable Life" && <EquitableReview d={sf.insuranceQuestionnaire.equitableLife}/>}
           </ReviewPanel>
@@ -5016,7 +5175,7 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
         )}
 
         <div className="text-xs text-gray-500 text-center pt-4 border-t mt-4">
-          This document was generated by Triton Compliance Form Portal. Please review all information carefully before sending to the client for signature.
+          This document was generated by {profile.brandName} Compliance Form Portal. Please review all information carefully before sending to the client for signature.
         </div>
       </div>
     </div>
@@ -5035,12 +5194,12 @@ const ManulifeReview = ({ d }) => (
     <ReviewSignaturePlaceholder label="Advisor signature" />
   </div>
 );
-const IAReview = ({ d }) => (
+const IAReview = ({ d, profile = ADVISOR_PROFILES.jie }) => (
   <div>
     <ReviewSummaryRow label="Application type" value={d.applicationType}/>
     <ReviewSummaryRow label="Name" value={d.lastFirstName}/>
     <ReviewSummaryRow label="DOB" value={d.dateOfBirth}/>
-    <ReviewSummaryRow label="Agent Name" value={d.agentName || DEFAULT_ADVISOR_NAME}/>
+    <ReviewSummaryRow label="Agent Name" value={d.agentName || profile.advisorName}/>
     <ReviewSummaryRow label="Choice matches profile?" value={d.choiceMatchesProfile}/>
     {["q1","q2","q3","q4","q5","q6","q7","q8"].map(k => d[k] && <ReviewSummaryRow key={k} label={`Q${k.slice(1)}`} value={d[k]}/>)}
     <ReviewSignaturePlaceholder label="Client signature" />
@@ -5137,6 +5296,34 @@ const LoginScreen = ({ onLogin }) => {
     </div>
   );
 };
+
+
+const AdvisorProfileSelection = ({ onSelect }) => (
+  <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "linear-gradient(135deg, #07172E, #10284B)" }}>
+    <div className="bg-white rounded-xl shadow-2xl p-8 max-w-3xl w-full">
+      <div className="text-center mb-7">
+        <div className="en-label text-gold">Advisor Profile</div>
+        <h1 className="text-2xl font-bold text-navy mt-2">Choose advisor for this session</h1>
+        <p className="text-sm text-gray-600 mt-2">New drafts and PDF branding will follow the selected advisor profile.</p>
+      </div>
+      <div className="grid md:grid-cols-2 gap-4">
+        {Object.values(ADVISOR_PROFILES).map(profile => (
+          <button
+            key={profile.key}
+            onClick={() => onSelect(profile.key)}
+            className="text-left border border-gray-200 rounded-lg p-5 hover:border-gold hover:shadow-md transition bg-white"
+          >
+            <div className="text-lg font-bold text-navy">{profile.advisorName}</div>
+            <div className="text-sm text-gray-600 mt-1">{profile.firmName}</div>
+            <div className="text-xs uppercase tracking-widest text-gray-400 mt-4">
+              {profile.showLogo ? "Triton branded PDF" : "No Triton logo in PDF"}
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  </div>
+);
 
 
 const ChangePasswordModal = ({ open, onClose }) => {
@@ -5275,7 +5462,7 @@ const App = () => {
   /* -- drafts state (lazy init bootstraps from localStorage or makes a blank one) -- */
   const [drafts, setDrafts] = useState(() => {
     const loaded = loadDraftsList();
-    return loaded.length ? loaded : [makeDraft()];
+    return loaded.length ? loaded : [makeDraft(null, localStorage.getItem(ADVISOR_PROFILE_KEY) || DEFAULT_ADVISOR_PROFILE_KEY)];
   });
   const [activeDraftId, setActiveDraftId] = useState(() => {
     const loaded = loadDraftsList();
@@ -5285,6 +5472,8 @@ const App = () => {
   const [saveMsg, setSaveMsg] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [portalUnlocked, setPortalUnlocked] = useState(() => isPortalUnlocked());
+  const [selectedAdvisorProfileKey, setSelectedAdvisorProfileKey] = useState(() => localStorage.getItem(ADVISOR_PROFILE_KEY) || DEFAULT_ADVISOR_PROFILE_KEY);
+  const [profileSelected, setProfileSelected] = useState(() => !!localStorage.getItem(ADVISOR_PROFILE_KEY));
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
   /* Ensure activeDraftId always points at a real draft */
@@ -5302,6 +5491,7 @@ const App = () => {
     [drafts, activeDraftId]
   );
   const formData = activeDraft.formData;
+  const activeProfile = getAdvisorProfile(formData?.advisorProfileKey || selectedAdvisorProfileKey);
   const currentStepIdx = activeDraft.currentStep || 0;
 
   const steps = useMemo(() => buildSteps(formData), [formData]);
@@ -5324,6 +5514,16 @@ const App = () => {
   const update = useCallback((section, value) => {
     setDrafts(ds => ds.map(d => d.id === activeDraftId
       ? { ...d, formData: { ...d.formData, [section]: value }, updatedAt: Date.now() }
+      : d
+    ));
+  }, [activeDraftId]);
+
+  const handleSelectAdvisorProfile = useCallback((profileKey) => {
+    localStorage.setItem(ADVISOR_PROFILE_KEY, profileKey);
+    setSelectedAdvisorProfileKey(profileKey);
+    setProfileSelected(true);
+    setDrafts(ds => ds.map(d => d.id === activeDraftId
+      ? { ...d, formData: applyAdvisorProfileToFormData(d.formData, profileKey), updatedAt: Date.now() }
       : d
     ));
   }, [activeDraftId]);
@@ -5415,7 +5615,7 @@ const App = () => {
 
   /* ---- draft management actions ---- */
   const handleNewDraft = () => {
-    const nd = makeDraft();
+    const nd = makeDraft(null, selectedAdvisorProfileKey);
     setDrafts(ds => [nd, ...ds]);   // newest on top
     setActiveDraftId(nd.id);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -5435,7 +5635,7 @@ const App = () => {
       const next = ds.filter(x => x.id !== id);
       // If we just deleted the last one, seed with a blank
       if (next.length === 0) {
-        const blank = makeDraft();
+        const blank = makeDraft(null, selectedAdvisorProfileKey);
         setActiveDraftId(blank.id);
         return [blank];
       }
@@ -5454,7 +5654,7 @@ const App = () => {
     if (!confirm("This will erase ALL drafts and reset the entire portal. Continue?")) return;
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(STORAGE_KEY_LEGACY);
-    const blank = makeDraft();
+    const blank = makeDraft(null, selectedAdvisorProfileKey);
     setDrafts([blank]);
     setActiveDraftId(blank.id);
   };
@@ -5464,7 +5664,7 @@ const App = () => {
 
   const renderStep = () => {
     switch (stepKey) {
-      case "advisorDisclosure": return <AdvisorDisclosureForm data={formData} update={update}/>;
+      case "advisorDisclosure": return <AdvisorDisclosureForm data={formData} update={update} profile={activeProfile}/>;
       case "businessType":      return <BusinessTypeSelection data={formData} update={update}/>;
       case "leverageSelection": return <LeverageLoanSelection data={formData} update={update}/>;
       case "leverageCompliance":return <LeverageComplianceForm data={formData} update={update} markManualNamePath={markManualNamePath}/>;
@@ -5496,6 +5696,9 @@ const App = () => {
   if (!portalUnlocked) {
     return <LoginScreen onLogin={() => setPortalUnlocked(true)}/>;
   }
+  if (!profileSelected) {
+    return <AdvisorProfileSelection onSelect={handleSelectAdvisorProfile}/>;
+  }
 
   const showHero = currentStepIdx === 0;
 
@@ -5506,9 +5709,11 @@ const App = () => {
       <header className="app-header no-print">
         <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div className="flex items-center gap-4">
-            <img src={window.TRITON_LOGO_COVER || window.TRITON_LOGO || "./Triton Logo 2.png"} alt="Triton Wealth Management 富瑞财富" className="logo-mark"/>
+            {activeProfile.showLogo
+              ? <img src={window.TRITON_LOGO_COVER || window.TRITON_LOGO || "./Triton Logo 2.png"} alt="Triton Wealth Management 富瑞财富" className="logo-mark"/>
+              : <div className="logo-mark flex items-center justify-center text-white font-bold border border-white/25 rounded" style={{ width: 58, height: 58, fontSize: 13 }}>2142759</div>}
             <div className="hidden md:block border-l border-white/15 pl-4">
-              <div className="en-label" style={{ color: "var(--c-gold)" }}>Triton Wealth Management · 富瑞财富</div>
+              <div className="en-label" style={{ color: "var(--c-gold)" }}>{activeProfile.brandName}{activeProfile.showChineseBrand ? " · 富瑞财富" : ""}</div>
               <div className="text-white" style={{ fontFamily: "var(--f-sans)", fontSize: "1.02rem", fontStyle: "normal", letterSpacing: "0" }}>
                 Compliance Form Portal
               </div>
@@ -5516,6 +5721,16 @@ const App = () => {
           </div>
           <div className="flex flex-wrap items-center gap-3 text-xs">
             {saveMsg && <span className="text-green-300 serif-italic">{saveMsg}</span>}
+            <select
+              value={activeProfile.key}
+              onChange={e => handleSelectAdvisorProfile(e.target.value)}
+              className="px-3 py-2 text-xs uppercase tracking-widest font-medium border border-white/35 text-white rounded bg-transparent"
+              title="Advisor profile"
+            >
+              {Object.values(ADVISOR_PROFILES).map(profile => (
+                <option key={profile.key} value={profile.key} style={{ color: "#0B1E3F" }}>{profile.advisorName}</option>
+              ))}
+            </select>
             <button onClick={handleSaveDraft}
               className="px-4 py-2 text-xs uppercase tracking-widest font-medium border border-[#C9A961] text-[#C9A961] rounded hover:bg-[#C9A961] hover:text-[#0B1E3F] transition">
               Save Draft
@@ -5570,7 +5785,7 @@ const App = () => {
                   专业 · 严谨 · <span className="accent">合规优先</span>
                 </h2>
                 <p>
-                  本系统用于 Triton Wealth Management 顾问完成客户合规文件签署流程。请按步骤完成所有必填栏目，系统会自动整合所有表单生成正式 PDF，可直接下载并发送给客户签字。
+                  本系统用于 {activeProfile.brandName} 顾问完成客户合规文件签署流程。请按步骤完成所有必填栏目，系统会自动整合所有表单生成正式 PDF，可直接下载并发送给客户签字。
                 </p>
                 <div className="gold-divider mt-4" style={{ background: "linear-gradient(90deg, var(--c-gold), transparent)" }}></div>
                 <div className="flex flex-wrap gap-x-6 gap-y-2 mt-3 text-xs uppercase tracking-widest" style={{ color: "rgba(245,242,235,0.7)" }}>
@@ -5610,10 +5825,12 @@ const App = () => {
       <footer className="app-footer no-print mt-10">
         <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div className="flex items-center gap-3">
-            <img src={window.TRITON_LOGO_COVER || window.TRITON_LOGO || "./Triton Logo 2.png"} alt="Triton" className="footer-logo"/>
+            {activeProfile.showLogo && <img src={window.TRITON_LOGO_COVER || window.TRITON_LOGO || "./Triton Logo 2.png"} alt="Triton" className="footer-logo"/>}
             <div className="text-xs">
-              <div style={{ color: "var(--c-cream)" }}>Triton Wealth Management Corporation · 富瑞财富</div>
-              <div style={{ color: "rgba(245, 242, 235, 0.55)" }}>#1200 1200 W 73rd Ave Vancouver, BC V6P 6G5 · (778) 837-6688</div>
+              <div style={{ color: "var(--c-cream)" }}>{activeProfile.firmName}{activeProfile.showChineseBrand ? " · 富瑞财富" : ""}</div>
+              {(activeProfile.addressLines.length || activeProfile.phone) && (
+                <div style={{ color: "rgba(245, 242, 235, 0.55)" }}>{[...activeProfile.addressLines, activeProfile.phone].filter(Boolean).join(" · ")}</div>
+              )}
             </div>
           </div>
           <div className="text-xs uppercase tracking-widest" style={{ color: "rgba(245, 242, 235, 0.55)" }}>
