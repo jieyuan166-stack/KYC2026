@@ -9,6 +9,7 @@ services:
       - ../server/.env
     environment:
       PORT: "3000"
+      NODE_ENV: "production"
       ALLOWED_ORIGINS: "https://kyc.tritonwealth.ca,http://localhost:3000"
     ports:
       - "3000:3000"
