@@ -147,6 +147,7 @@ if (fs.existsSync(portalPath)) {
   app.get("/triton-compliance-portal.html", (req, res) => res.sendFile(portalPath));
   const publicAssets = new Set([
     "triton-logo.png",
+    "triton-logo-cn.png",
     "Triton Logo 2.png",
     "triton-logo-data.js",
   ]);

@@ -391,6 +391,7 @@ const ADVISOR_PROFILES = {
     addressLines: ["#1200 1200 W 73rd Ave", "Vancouver, BC V6P 6G5"],
     phone: "(778) 837-6688",
     showLogo: true,
+    logoVariant: "full",
     showChineseBrand: true,
   },
   shiyun: {
@@ -403,12 +404,23 @@ const ADVISOR_PROFILES = {
     headerRole: "Independent Advisor",
     addressLines: ["#1200 1200 W 73rd Ave", "Vancouver, BC V6P 6G5"],
     phone: "(604) 345-5188",
-    showLogo: false,
+    showLogo: true,
+    logoVariant: "cnOnly",
     showChineseBrand: false,
   },
 };
 const DEFAULT_ADVISOR_PROFILE_KEY = "jie";
 const getAdvisorProfile = (key) => ADVISOR_PROFILES[key] || ADVISOR_PROFILES[DEFAULT_ADVISOR_PROFILE_KEY];
+const profileLogoSrc = (profile = ADVISOR_PROFILES.jie, variant = "standard") => {
+  if (!profile?.showLogo) return "";
+  if (profile.logoVariant === "cnOnly") {
+    return (typeof window !== "undefined" && window.TRITON_LOGO_CN) || "./triton-logo-cn.png";
+  }
+  if (variant === "cover") {
+    return (typeof window !== "undefined" && (window.TRITON_LOGO_COVER || window.TRITON_LOGO)) || "./Triton Logo 2.png";
+  }
+  return (typeof window !== "undefined" && (window.TRITON_LOGO_STACK || window.TRITON_LOGO || window.TRITON_LOGO_COVER)) || "./LOGO PNG 竖版.png";
+};
 const DEFAULT_ADVISOR_NAME = ADVISOR_PROFILES.jie.advisorName;
 const advisorNameValues = () => Object.values(ADVISOR_PROFILES).map(p => p.advisorName);
 const shouldReplaceAdvisorValue = (value) => !hasText(value) || advisorNameValues().includes(String(value).trim());
@@ -3667,17 +3679,29 @@ class PdfWriter {
     this.footer();
   }
   logoData() {
-    return (typeof window !== "undefined" && (window.TRITON_LOGO_STACK || window.TRITON_LOGO_COVER || window.TRITON_LOGO)) || "";
+    return profileLogoSrc(this.profile, "standard");
   }
   coverLogoData() {
-    return (typeof window !== "undefined" && (window.TRITON_LOGO_COVER || window.TRITON_LOGO || window.TRITON_LOGO_STACK)) || "";
+    return profileLogoSrc(this.profile, "cover");
   }
   drawLogo(x, y, width = 17, height = 17, variant = "stack") {
     if (!this.profile.showLogo) return;
     const logo = variant === "cover" ? this.coverLogoData() : this.logoData();
     if (!logo) return;
+    let drawW = width;
+    let drawH = height;
+    if (this.profile.logoVariant === "cnOnly") {
+      const cnRatio = 1001 / 858;
+      if (variant === "cover") {
+        drawW = Math.min(width, 42);
+        drawH = drawW / cnRatio;
+      } else {
+        drawH = height;
+        drawW = drawH * cnRatio;
+      }
+    }
     try {
-      this.pdf.addImage(logo, "PNG", x, y, width, height, `triton-logo-${variant}`, "FAST");
+      this.pdf.addImage(logo, "PNG", x, y, drawW, drawH, `triton-logo-${this.profile.logoVariant || "full"}-${variant}`, "FAST");
     } catch (err) {
       // Keep PDF export working even if a viewer rejects the embedded image.
     }
@@ -5330,7 +5354,7 @@ const AdvisorProfileSelection = ({ onSelect }) => (
             <div className="text-lg font-bold text-navy">{profile.advisorName}</div>
             <div className="text-sm text-gray-600 mt-1">{profile.firmName}</div>
             <div className="text-xs uppercase tracking-widest text-gray-400 mt-4">
-              {profile.showLogo ? "Triton branded PDF" : "No Triton logo in PDF"}
+              {profile.logoVariant === "cnOnly" ? "CN-only Triton logo PDF" : profile.showLogo ? "Triton branded PDF" : "No Triton logo in PDF"}
             </div>
           </button>
         ))}
@@ -5724,7 +5748,7 @@ const App = () => {
         <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div className="flex items-center gap-4">
             {activeProfile.showLogo
-              ? <img src={window.TRITON_LOGO_COVER || window.TRITON_LOGO || "./Triton Logo 2.png"} alt="Triton Wealth Management 富瑞财富" className="logo-mark"/>
+              ? <img src={profileLogoSrc(activeProfile, "cover")} alt={activeProfile.logoVariant === "cnOnly" ? "富瑞财富" : "Triton Wealth Management 富瑞财富"} className="logo-mark"/>
               : <div className="logo-mark flex items-center justify-center text-white font-bold border border-white/25 rounded" style={{ width: 58, height: 58, fontSize: 13 }}>2142759</div>}
             <div className="hidden md:block border-l border-white/15 pl-4">
               <div className="en-label" style={{ color: "var(--c-gold)" }}>{activeProfile.brandName}{activeProfile.showChineseBrand ? " · 富瑞财富" : ""}</div>
@@ -5839,7 +5863,7 @@ const App = () => {
       <footer className="app-footer no-print mt-10">
         <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div className="flex items-center gap-3">
-            {activeProfile.showLogo && <img src={window.TRITON_LOGO_COVER || window.TRITON_LOGO || "./Triton Logo 2.png"} alt="Triton" className="footer-logo"/>}
+            {activeProfile.showLogo && <img src={profileLogoSrc(activeProfile, "cover")} alt={activeProfile.logoVariant === "cnOnly" ? "富瑞财富" : "Triton"} className="footer-logo"/>}
             <div className="text-xs">
               <div style={{ color: "var(--c-cream)" }}>{activeProfile.firmName}{activeProfile.showChineseBrand ? " · 富瑞财富" : ""}</div>
               {(activeProfile.addressLines.length || activeProfile.phone) && (
