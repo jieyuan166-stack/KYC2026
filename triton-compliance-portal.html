@@ -419,6 +419,8 @@ const REASON_WHY_ACCOUNT_OPTIONS = [
   { value: "Non-Registered", label: "Non-Registered" },
   { value: "Spousal RRSP", label: "Spousal RRSP" },
 ];
+const DEFAULT_REASON_WHY_ACCOUNT_TYPE = "TFSA";
+const reasonWhyAccountType = (reasonWhy) => makeReasonWhy(reasonWhy).accountType || DEFAULT_REASON_WHY_ACCOUNT_TYPE;
 const todayISO = () => {
   const d = new Date();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -2720,6 +2722,8 @@ const reasonWhyContext = (data) => {
   const ad = data.advisorDisclosure || {};
   const nl = sf.nonLeverageCompliance || {};
   const lc = sf.leverageCompliance || {};
+  const rw = makeReasonWhy(sf.reasonWhy);
+  const accountType = reasonWhyAccountType(rw);
   const profile = getAdvisorProfile(data.advisorProfileKey);
   const clientName = fullClientName(ad) || nl.clientNames || lc.clientNameAck || "Client";
   const client2Name = (ad.client2Name || lc.jointNameAck || "").trim();
@@ -2730,8 +2734,8 @@ const reasonWhyContext = (data) => {
     advisorName: profile.advisorName,
     firmName: profile.firmName,
     brandName: profile.brandName,
-    accountType: normalizeReasonWhyAccountType(sf.reasonWhy?.accountType),
-    accountLabel: reasonWhyLabel(sf.reasonWhy?.accountType),
+    accountType,
+    accountLabel: reasonWhyLabel(accountType),
     date: fmtLongDate(todayISO()),
     clientName,
     client2Name,
@@ -2805,7 +2809,7 @@ const generateReasonWhyBody = (data) => {
     "Non-Registered": `REASON WHY LETTER\n${ctx.company} Segregated Fund Contract - Non-Registered\n${ctx.date}\n\nDear ${greetingName},\n\nRecommendation\nBased on our recent meeting and the financial needs analysis we completed together, I am recommending that you establish a Non-Registered account under a segregated fund contract with ${ctx.company}. The contribution amount is ${ctx.investmentAmount}.\n\nYour Stated Needs & Objectives\nDuring our recent meeting, we reviewed your overall financial situation, long-term goals, and your comfort level with investment risk. Your primary objectives are to continue building investment wealth beyond registered accounts, protect those assets through an insurance-contract structure where applicable, and manage the tax impact of investment growth.\n\nHow This Recommendation Meets Your Needs\nThe ${ctx.company} Non-Registered segregated fund contract addresses these objectives in ways that traditional non-registered accounts may not. Investment growth may include capital gains, interest, dividends, or other allocations, and tax treatment will depend on the nature of the income allocated and your personal tax situation. Based on your investment horizon and risk tolerance, we selected a diversified portfolio of segregated funds aligned with your long-term wealth-building objectives.\n\n${investmentStrategyDisclosure}\n\n${commonDisclosure}\n\nAlternatives Considered\nWe discussed traditional non-registered mutual fund accounts, GICs, and direct ownership of securities. The segregated fund contract was recommended because it provides insurance-contract features in addition to the maturity and death benefit guarantees that ordinary investment accounts do not provide.\n\n${commonClose}`,
     "Spousal RRSP": `REASON WHY LETTER\n${ctx.company} Segregated Fund Contract - Spousal RRSP\n${ctx.date}\n\nDear ${greetingName},\n\nRecommendation\nBased on our recent meeting and the financial needs analysis we completed together, I am recommending that ${ctx.householdName || ctx.clientName} establish a Spousal Registered Retirement Savings Plan (Spousal RRSP) under a segregated fund contract with ${ctx.company}. The contribution amount is ${ctx.investmentAmount}.\n\nYour Stated Needs & Objectives\nDuring our recent meeting, we reviewed your household's overall financial situation, long-term retirement goals, and risk tolerance as a couple. Your primary objectives are to build retirement savings, support future retirement income planning between spouses, protect the invested capital, and maintain an insurance-contract structure.\n\nHow This Recommendation Meets Your Needs\nA Spousal RRSP allows a household to direct retirement savings toward a spouse and may support future retirement income planning. Based on your household retirement time horizon and risk tolerance, we selected a diversified portfolio of segregated funds aligned with your long-term planning objectives.\n\nThree-Year Attribution Rule\nI have explained that under the Income Tax Act, if funds are withdrawn from a Spousal RRSP in the same calendar year a contribution is made or in either of the two following calendar years, the withdrawn amount, up to the amount of contributions made in that period, may be attributed back to the contributor and taxed in the contributor's hands. We have reviewed the intended contribution and withdrawal timing with this rule in mind.\n\n${investmentStrategyDisclosure}\n\n${commonDisclosure}\n\nAlternatives Considered\nWe discussed each spouse contributing separately to individual RRSPs and using future retirement income planning strategies. The Spousal RRSP was recommended because it can provide additional household retirement planning flexibility while adding segregated fund contract features.\n\n${commonClose}`,
   };
-  return normalizeAdvisorBrandText(stripTemplatePlaceholders(templates[ctx.accountType] || ""), data);
+  return normalizeAdvisorBrandText(stripTemplatePlaceholders(templates[ctx.accountType] || templates[DEFAULT_REASON_WHY_ACCOUNT_TYPE] || ""), data);
 };
 
 /* ============================================================
@@ -4008,50 +4012,57 @@ class PdfWriter {
   }
 }
 const pdfRows = (rows) => rows.map(row => row.map(cell => cleanPdfText(cell)));
+const pairRows = (items) => {
+  const rows = [];
+  for (let i = 0; i < items.length; i += 2) rows.push([items[i] || "", items[i + 1] || ""]);
+  return rows;
+};
 const drawShiyunAdvisorDisclosureVector = (w, ad, profile) => {
-  w.addPage(); w.header("Insurance Disclosure and Privacy Consent", `${profile.advisorName}, Independent Advisor, ${profile.firmName}`, "Page 1 of 3");
+  const carriers = ["CANADA LIFE", "MANULIFE", "SUN LIFE", "EQUITABLE LIFE", "iA FINANCIAL", "DESJARDINS", "BMO INSURANCE", "FORESTERS", "CPP", "TUGO"];
+  w.addPage(); w.header("Insurance Disclosure and Privacy Consent", `${profile.advisorName}, Independent Advisor, ${profile.firmName}`, "");
   w.section("Insurance Disclosure - About me", () => {
-    w.textBlock("I am licensed as a life and health insurance agent in following province:");
-    w.textBlock("AB, BC and ON", { bold: true });
-    w.textBlock("I am also licensed/registered in the following fields:");
-    w.textBlock("Exempt market business in BC and AB, contracting through Enoch Wealth Inc.", { bold: true });
+    w.textBlock("I am licensed as a life and health insurance agent in following province:", { size: 9.2, lineH: 4.6, gap: 1.2 });
+    w.textBlock("AB, BC and ON", { size: 9.2, lineH: 4.6, bold: true, gap: 1.8 });
+    w.textBlock("I am also licensed/registered in the following fields:", { size: 9.2, lineH: 4.6, gap: 1.2 });
+    w.textBlock("Exempt market business in BC and AB, contracting through Enoch Wealth Inc.", { size: 9.2, lineH: 4.6, bold: true, gap: 1.2 });
   });
   w.section("Companies I represent", () => {
-    w.textBlock("I represent the following insurers to market their products which include life insurance, critical illness insurance, disability insurance, travel insurance, group insurance, and segregated funds through Citistar Financial Services Ltd., a Managing General Agency (MGA):");
-    w.table(["Name of Business / Insurance Carriers"], [["CANADA LIFE"], ["MANULIFE"], ["SUN LIFE"], ["EQUITABLE LIFE"], ["iA FINANCIAL"], ["DESJARDINS"], ["BMO INSURANCE"], ["FORESTERS"], ["CPP"], ["TUGO"]]);
+    w.textBlock("I represent the following insurers to market their products which include life insurance, critical illness insurance, disability insurance, travel insurance, group insurance, and segregated funds through Citistar Financial Services Ltd., a Managing General Agency (MGA):", { size: 9.1, lineH: 4.6, gap: 1.8 });
+    w.table(["Name of Business / Insurance Carriers", "Name of Business / Insurance Carriers"], pairRows(carriers), [w.contentW / 2, w.contentW / 2]);
   });
   w.section("Nature of relationship with insurance company(ies) I represent", () => {
-    w.textBlock("In the event that you decide to purchase life insurance products through me, you understand that life insurance products purchased are separate from and not contingent on activities involving Exempt market services. Furthermore, no Insurer holds ownership interest in Shiyun Qiu/2142759 Alberta Ltd., and Shiyun Qiu/2142759 Alberta Ltd. does not hold an ownership interest in any Insurer.");
-    w.textBlock("I will notify you immediately of any other existing or perceived conflict of interest that may relate to any life insurance recommendation that I make if they arise.");
+    w.textBlock("In the event that you decide to purchase life insurance products through me, you understand that life insurance products purchased are separate from and not contingent on activities involving Exempt market services. Furthermore, no Insurer holds ownership interest in Shiyun Qiu/2142759 Alberta Ltd., and Shiyun Qiu/2142759 Alberta Ltd. does not hold an ownership interest in any Insurer.", { size: 9.1, lineH: 4.7, gap: 2 });
+    w.textBlock("I will notify you immediately of any other existing or perceived conflict of interest that may relate to any life insurance recommendation that I make if they arise.", { size: 9.1, lineH: 4.7, gap: 2 });
   });
-  w.finishPage();
-  w.addPage(); w.header("Insurance Disclosure and Privacy Consent", "", "Page 2 of 3");
   w.section("Insurance Compensation", () => {
-    w.textBlock("I am compensated by sales commission on policies I sell and may receive a renewal (or service) commission on policies that remain active. Commissions are paid by the insurance company that provides the product you purchased. For certain products I may receive a referral fee.");
-    w.textBlock("I may be eligible for additional compensation and other benefits, such as bonuses and professional conferences which may be based on my sales reaching a certain level. I may also be entitled to participate in a share purchase plan.");
+    w.textBlock("I am compensated by sales commission on policies I sell and may receive a renewal (or service) commission on policies that remain active. Commissions are paid by the insurance company that provides the product you purchased. For certain products I may receive a referral fee.", { size: 9.1, lineH: 4.7, gap: 2 });
+    w.textBlock("I may be eligible for additional compensation and other benefits, such as bonuses and professional conferences which may be based on my sales reaching a certain level. I may also be entitled to participate in a share purchase plan.", { size: 9.1, lineH: 4.7, gap: 2 });
   });
-  w.section("Potential conflict or conflict of interest", () => w.textBlock("I confirm that I have no conflict of interest. If I become aware of a potential conflict I will tell you."));
-  w.section("More information", () => w.textBlock("If you need more information about my qualifications or my business relationships, please let me know."));
+  w.section("Potential conflict or conflict of interest", () => w.textBlock("I confirm that I have no conflict of interest. If I become aware of a potential conflict I will tell you.", { size: 9.1, lineH: 4.7, gap: 1.5 }));
+  w.section("More information", () => w.textBlock("If you need more information about my qualifications or my business relationships, please let me know.", { size: 9.1, lineH: 4.7, gap: 1.5 }));
+  if (w.y > 218) {
+    w.finishPage();
+    w.addPage();
+    w.header("Insurance Disclosure and Privacy Consent", "", "");
+  }
   w.section("Privacy commitment and your client file", () => {
-    w.textBlock("Protecting the privacy of your personal information is important to me and the companies whose products and services I offer, and I'm committed to collecting, using and disclosing your personal information responsibly. The personal information being collected, such as contact information, financial information, medical information, as well as records of meetings and phone calls, general correspondence and any instructions you provide to me, will be maintained by me or at my direction in paper and/or electronic format in a client file. This information will be used to assess your financial situation, offer products and services that may be of interest and benefit to you, and provide ongoing client service.");
-    w.textBlock("Your personal information in your client file will be disclosed ONLY to:");
-    w.textBlock("- Me or my firm's employees, my MGA - Citistar Financial and employees and persons authorized by me or by my firm;", { size: 9 });
-    w.textBlock("- Companies whose products and services I offer and their employees and agents, for the purpose of, or relating to, their providing or seeking to provide financial products or services to you and for any other purposes you have authorized;", { size: 9 });
-    w.textBlock("- Persons or entities to which you have granted access or that are allowed access by law.", { size: 9 });
+    w.textBlock("Protecting the privacy of your personal information is important to me and the companies whose products and services I offer, and I'm committed to collecting, using and disclosing your personal information responsibly. The personal information being collected, such as contact information, financial information, medical information, as well as records of meetings and phone calls, general correspondence and any instructions you provide to me, will be maintained by me or at my direction in paper and/or electronic format in a client file. This information will be used to assess your financial situation, offer products and services that may be of interest and benefit to you, and provide ongoing client service.", { size: 8.8, lineH: 4.4, gap: 1.8 });
+    w.textBlock("Your personal information in your client file will be disclosed ONLY to:", { size: 8.8, lineH: 4.4, gap: 1.2 });
+    w.textBlock("- Me or my firm's employees, my MGA - Citistar Financial and employees and persons authorized by me or by my firm;", { size: 8.6, lineH: 4.2, gap: 1.1 });
+    w.textBlock("- Companies whose products and services I offer and their employees and agents, for the purpose of, or relating to, their providing or seeking to provide financial products or services to you and for any other purposes you have authorized;", { size: 8.6, lineH: 4.2, gap: 1.1 });
+    w.textBlock("- Persons or entities to which you have granted access or that are allowed access by law.", { size: 8.6, lineH: 4.2, gap: 1.1 });
   });
-  w.finishPage();
-  w.addPage(); w.header("Insurance Disclosure and Privacy Consent", "", "Page 3 of 3");
   w.section("Privacy commitment and your client file - continued", () => {
-    w.textBlock("In accordance with applicable law and by your written request, you have the right to: review the personal information in your client file, request corrections to this information, and to revoke your consent subject to contractual limitations.");
-    w.textBlock("If requested by you, additional personal documents such as copies of insurance policies, wills and powers of attorney may be kept in your client file.");
-    w.textBlock("If you need more information about my privacy policies and/or those of the companies I represent, please let me know.");
+    w.textBlock("In accordance with applicable law and by your written request, you have the right to: review the personal information in your client file, request corrections to this information, and to revoke your consent subject to contractual limitations.", { size: 8.8, lineH: 4.4, gap: 1.5 });
+    w.textBlock("If requested by you, additional personal documents such as copies of insurance policies, wills and powers of attorney may be kept in your client file.", { size: 8.8, lineH: 4.4, gap: 1.5 });
+    w.textBlock("If you need more information about my privacy policies and/or those of the companies I represent, please let me know.", { size: 8.8, lineH: 4.4, gap: 1.5 });
   });
   w.section("Compliance with Canadian Anti-Spam Law and its Regulations (CASL)", () => {
-    w.textBlock("I consent to receiving electronic communications from Shiyun Qiu about my insurance and/or investment needs and coverage and information about products and services that might benefit me. I understand that I may withdraw my consent at any time.");
-    w.textBlock("By signing below, you give your consent to collect and maintain your personal information in your client file and consent to receiving electronic communications.", { bold: true });
+    w.textBlock("I consent to receiving electronic communications from Shiyun Qiu about my insurance and/or investment needs and coverage and information about products and services that might benefit me. I understand that I may withdraw my consent at any time.", { size: 8.8, lineH: 4.4, gap: 1.5 });
+    w.textBlock("By signing below, you give your consent to collect and maintain your personal information in your client file and consent to receiving electronic communications.", { size: 8.8, lineH: 4.4, bold: true, gap: 1.5 });
   });
   w.section("Acknowledgment and Consent", () => {
-    w.textBlock(`I, ${ad.clientName || ad.client1Name || "________________"} (Client Name) acknowledge that I have reviewed this document. I understand any conflicts of interest or potential conflicts of interest outlined in this document. I also consent to a client file being created and maintained for me.`);
+    w.textBlock(`I, ${ad.clientName || ad.client1Name || "________________"} (Client Name) acknowledge that I have reviewed this document. I understand any conflicts of interest or potential conflicts of interest outlined in this document. I also consent to a client file being created and maintained for me.`, { size: 8.8, lineH: 4.4, gap: 1.5 });
     w.check(ad.spouseConsent, "I consent to my personal information being maintained in a joint client file with my spouse and being disclosed to my spouse. (Requires signature of spouse, if selected.)");
     w.signature(ad.client1Name || ad.clientName, "Client 1");
     if (ad.client2Name || ad.spouseConsent) w.signature(ad.client2Name, "Client 2");
@@ -4534,15 +4545,17 @@ const buildVectorPdf = async (data) => {
   if (isSegFund) {
     const rw = makeReasonWhy(sf.reasonWhy);
     if (reasonWhyHasAttachment(rw) && rw.attachment.kind === "docx" && hasText(rw.attachment.text)) drawReasonWhyVector(w, data, true);
-    if (!reasonWhyHasAttachment(rw) && rw.accountType) {
+    if (!reasonWhyHasAttachment(rw) && rw.include !== false) {
       let reasonWhyData = data;
+      const accountType = reasonWhyAccountType(rw);
       if (!hasText(rw.body)) {
         reasonWhyData = deepClone(data);
         const generatedReasonWhy = {
           ...rw,
           include: true,
+          accountType,
           body: generateReasonWhyBody(reasonWhyData),
-          generatedAccountType: rw.accountType,
+          generatedAccountType: accountType,
         };
         reasonWhyData.segregatedFundInvestment.reasonWhy = generatedReasonWhy;
         generatedReasonWhy.sourceSnapshot = reasonWhySourceSnapshot(reasonWhyData);
@@ -4775,14 +4788,16 @@ const effectiveReasonWhyData = (data) => {
   if (data?.businessType !== "Segregated Fund Investment") return data;
   const sf = data.segregatedFundInvestment || {};
   const rw = makeReasonWhy(sf.reasonWhy);
-  if (reasonWhyHasAttachment(rw) || !rw.accountType) return data;
+  if (reasonWhyHasAttachment(rw)) return data;
   if (rw.include !== false && hasText(rw.body)) return data;
+  const accountType = reasonWhyAccountType(rw);
   const effectiveData = deepClone(data);
   const effectiveReasonWhy = {
     ...rw,
     include: true,
+    accountType,
     body: hasText(rw.body) ? rw.body : generateReasonWhyBody(effectiveData),
-    generatedAccountType: rw.accountType,
+    generatedAccountType: accountType,
   };
   effectiveData.segregatedFundInvestment.reasonWhy = effectiveReasonWhy;
   effectiveReasonWhy.sourceSnapshot = reasonWhySourceSnapshot(effectiveData);
@@ -4843,13 +4858,6 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
   // Builds a data-driven vector PDF. Text/tables/signature boxes are drawn with
   // jsPDF primitives instead of rasterising hidden HTML pages.
   const buildPdf = async () => {
-    if (effectivePdfData.businessType === "Segregated Fund Investment") {
-      const rw = makeReasonWhy(effectivePdfData.segregatedFundInvestment.reasonWhy);
-      const hasReasonWhyAttachment = reasonWhyHasAttachment(rw);
-      if (!hasReasonWhyAttachment && !rw.accountType) {
-        throw new Error("Please select a Reason Why Letter account type before downloading the PDF.");
-      }
-    }
     return buildVectorPdf(effectivePdfData);
   };
 
@@ -4901,14 +4909,16 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
     setReasonWhy(nextReasonWhy);
   };
   const regenerateReasonWhy = () => {
-    if (!reasonWhy.accountType) {
-      alert("Please select a Reason Why Letter account type first.");
-      return;
-    }
+    const accountType = reasonWhyAccountType(reasonWhy);
+    const nextData = {
+      ...data,
+      segregatedFundInvestment: { ...sf, reasonWhy: { ...reasonWhy, accountType } },
+    };
     setReasonWhy({
-      body: generateReasonWhyBody(data),
-      generatedAccountType: reasonWhy.accountType,
-      sourceSnapshot: reasonWhySourceSnapshot(data),
+      accountType,
+      body: generateReasonWhyBody(nextData),
+      generatedAccountType: accountType,
+      sourceSnapshot: reasonWhySourceSnapshot(nextData),
     });
   };
   const reasonWhyCtx = reasonWhyContext(data);
@@ -4947,11 +4957,17 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
   };
   useEffect(() => {
     if (data.businessType !== "Segregated Fund Investment") return;
-    if (!reasonWhy.accountType || hasText(reasonWhy.body)) return;
+    if (hasText(reasonWhy.body)) return;
+    const accountType = reasonWhyAccountType(reasonWhy);
+    const nextData = {
+      ...data,
+      segregatedFundInvestment: { ...sf, reasonWhy: { ...reasonWhy, accountType } },
+    };
     setReasonWhy({
-      body: generateReasonWhyBody(data),
-      generatedAccountType: reasonWhy.accountType,
-      sourceSnapshot: reasonWhySourceSnapshot(data),
+      accountType,
+      body: generateReasonWhyBody(nextData),
+      generatedAccountType: accountType,
+      sourceSnapshot: reasonWhySourceSnapshot(nextData),
     });
   }, [data.businessType, reasonWhy.accountType, reasonWhy.body]);
   const li = data.lifeInsurance.needsAnalysis;
