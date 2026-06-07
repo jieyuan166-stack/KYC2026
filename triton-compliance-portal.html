@@ -676,6 +676,7 @@ const getDraftClientName = (draft) => {
   if (!ad) return "";
   return (ad.client1Name || ad.clientName || "").trim();
 };
+const getDraftAdvisorKey = (draft) => draft?.formData?.advisorProfileKey || DEFAULT_ADVISOR_PROFILE_KEY;
 const getDraftSpouseName = (draft) => (draft.formData?.advisorDisclosure?.client2Name || "").trim();
 
 /* Privacy-mask a name: keep first char, asterisk the rest (Chinese-aware) */
@@ -3810,17 +3811,18 @@ class PdfWriter {
     this.pdf.text(cleanPdfText(subtitle), PDF_MM.w / 2, this.y, { align: "center", maxWidth: this.contentW });
     this.y += continued ? 10 : 11;
   }
-  section(title, fn, minHeight = 18) {
-    this.ensure(minHeight + 12);
+  section(title, fn, minHeight = 18, options = {}) {
+    const compact = !!options.compact;
+    this.ensure(minHeight + (compact ? 7 : 12));
     this.pdf.setFillColor(PDF_VEC.navy);
-    this.pdf.rect(this.x, this.y - 1.5, this.contentW, 8.5, "F");
+    this.pdf.rect(this.x, this.y - 1.5, this.contentW, compact ? 6.8 : 8.5, "F");
     this.pdf.setFillColor(PDF_VEC.gold);
-    this.pdf.rect(this.x, this.y - 1.5, 0.8, 8.5, "F");
-    this.setFont(10.2, "bold", "#FFFFFF");
-    this.pdf.text(cleanPdfText(title), this.x + 4.2, this.y + 4);
-    this.y += 12.5;
+    this.pdf.rect(this.x, this.y - 1.5, 0.8, compact ? 6.8 : 8.5, "F");
+    this.setFont(compact ? 8.9 : 10.2, "bold", "#FFFFFF");
+    this.pdf.text(cleanPdfText(title), this.x + 4.2, this.y + (compact ? 3.2 : 4));
+    this.y += compact ? 8.8 : 12.5;
     fn();
-    this.y += 5;
+    this.y += compact ? 2.5 : 5;
   }
   field(label, value, width = this.contentW / 2 - 3) {
     const x = this.x;
@@ -3904,17 +3906,22 @@ class PdfWriter {
     const headerText = options.headerText || PDF_VEC.navy;
     const responseFill = options.responseFill || "#FFFFFF";
     const responseText = options.responseText || PDF_VEC.text;
+    const compact = !!options.compact;
+    const headerSize = compact ? 7.1 : 7.8;
+    const rowSize = compact ? 7.4 : 8.3;
+    const headerLineH = compact ? 3.1 : 3.6;
+    const rowLineH = compact ? 3.65 : 4.5;
     const drawHeader = () => {
-      const headerLines = headers.map((h, i) => this.textLines(h, colW[i] - 3, 7.8));
-      const headerH = Math.max(8.5, Math.max(...headerLines.map(lines => lines.length * 3.6 + 4.5)));
+      const headerLines = headers.map((h, i) => this.textLines(h, colW[i] - 3, headerSize));
+      const headerH = Math.max(compact ? 6.8 : 8.5, Math.max(...headerLines.map(lines => lines.length * headerLineH + (compact ? 3.2 : 4.5))));
       this.pdf.setDrawColor(PDF_VEC.creamDeep);
       let x = this.x;
       headers.forEach((h, i) => {
         this.pdf.setFillColor(headerFill);
         this.pdf.setDrawColor(PDF_VEC.creamDeep);
         this.pdf.rect(x, this.y, colW[i], headerH, "FD");
-        this.setFont(7.9, "bold", headerText);
-        this.pdf.text(headerLines[i], x + 1.5, this.y + 4.8);
+        this.setFont(compact ? 7.2 : 7.9, "bold", headerText);
+        this.pdf.text(headerLines[i], x + 1.5, this.y + (compact ? 4.0 : 4.8));
         x += colW[i];
       });
       this.pdf.setFillColor("#FFFFFF");
@@ -3924,8 +3931,8 @@ class PdfWriter {
     this.ensure(18);
     drawHeader();
     rows.forEach((row, ri) => {
-      const cellLines = row.map((cell, i) => this.textLines(cleanPdfText(cell) || " ", colW[i] - 3, 8.3));
-      const h = Math.max(10, Math.max(...cellLines.map(lines => lines.length * 4.5 + 5.2)));
+      const cellLines = row.map((cell, i) => this.textLines(cleanPdfText(cell) || " ", colW[i] - 3, rowSize));
+      const h = Math.max(compact ? 7.2 : 10, Math.max(...cellLines.map(lines => lines.length * rowLineH + (compact ? 3.2 : 5.2))));
       if (this.y + h > 258) {
         this.finishPage();
         this.addPage();
@@ -3937,15 +3944,15 @@ class PdfWriter {
         this.pdf.setFillColor(isResponseCell ? responseFill : (ri % 2 ? PDF_VEC.panel : "#FFFFFF"));
         this.pdf.setDrawColor(PDF_VEC.creamDeep);
         this.pdf.rect(x, this.y, colW[i], h, "FD");
-        this.setFont(8.3, "normal", isResponseCell ? responseText : PDF_VEC.text);
-        this.pdf.text(cellLines[i], x + 1.5, this.y + 5.4);
+        this.setFont(rowSize, "normal", isResponseCell ? responseText : PDF_VEC.text);
+        this.pdf.text(cellLines[i], x + 1.5, this.y + (compact ? 4.5 : 5.4));
         x += colW[i];
       });
       this.pdf.setFillColor("#FFFFFF");
       this.pdf.setTextColor(PDF_VEC.text);
       this.y += h;
     });
-    this.y += 6;
+    this.y += compact ? 3.2 : 6;
   }
   signature(name, role = "Client", width = 62) {
     const sigW = width;
@@ -3983,16 +3990,18 @@ class PdfWriter {
     this.pdf.setTextColor(PDF_VEC.text);
     this.y = labelY + boxH + 9;
   }
-  summary(label, value) {
-    this.ensure(18);
+  summary(label, value, options = {}) {
+    const compact = !!options.compact;
+    const boxH = compact ? 11.5 : 16;
+    this.ensure(compact ? 13 : 18);
     this.pdf.setFillColor(PDF_VEC.panel);
     this.pdf.setDrawColor(PDF_VEC.creamDeep);
-    this.pdf.rect(this.x, this.y, this.contentW, 16, "FD");
-    this.setFont(7.8, "bold", PDF_VEC.soft);
-    this.pdf.text(cleanPdfText(label), this.x + 3, this.y + 5);
-    this.setFont(12, "bold", PDF_VEC.text);
-    this.pdf.text(cleanPdfText(value || " - "), this.x + 3, this.y + 12);
-    this.y += 22;
+    this.pdf.rect(this.x, this.y, this.contentW, boxH, "FD");
+    this.setFont(compact ? 6.9 : 7.8, "bold", PDF_VEC.soft);
+    this.pdf.text(cleanPdfText(label), this.x + 3, this.y + (compact ? 4 : 5));
+    this.setFont(compact ? 9.8 : 12, "bold", PDF_VEC.text);
+    this.pdf.text(cleanPdfText(value || " - "), this.x + 3, this.y + (compact ? 9.2 : 12));
+    this.y += compact ? 14.5 : 22;
   }
   optionLine(option, selected, width = this.contentW - 7) {
     const text = `${option.l}${option.p !== undefined ? ` (${option.p} pts)` : ""}`;
@@ -4350,18 +4359,18 @@ const drawLifeInsuranceVector = (w, li) => {
   const maxCI = earned * num(li.ciIncomeMultiple) + num(li.ciMortgage);
   const maxLife = earned * num(li.lifeIncomeMultiple) + num(li.lifeMortgage);
   w.addPage(); w.header("Insurance Needs Analysis", "", "Life Insurance Needs Analysis - Page 1");
-  w.summary("Total Net Worth (CAD)", fmtMoney(totalNetWorth)); w.summary("ACB of Net Worth", fmtMoney(li.acbNetWorth));
-  w.section("Client Information", () => w.fields([["Client's Name", li.clientName], ["Occupation", li.occupation], ["Age", li.age], ["Industry", li.industry], ["Earned Income", fmtMoney(li.earnedIncome)], ["Unearned Income", fmtMoney(li.unearnedIncome)], ["Spouse Income", fmtMoney(li.spouseIncome)]], 2));
-  w.section("Canadian Fixed Assets", () => w.table(["Asset", "Market Value", "Mortgage & LOC", "Net Worth"], pdfRows([["Principal Residence", fmtMoney(li.fixedAssets.principalMV), fmtMoney(li.fixedAssets.principalLoan), fmtMoney(num(li.fixedAssets.principalMV)-num(li.fixedAssets.principalLoan))], ...investmentProperties.map(row => [row.name || "Investment Property", fmtMoney(row.marketValue), fmtMoney(row.loan), fmtMoney(num(row.marketValue)-num(row.loan))])])));
-  w.section("Canadian Liquid Assets", () => w.table(["Asset", "Market Value", "Loan", "Net Worth"], pdfRows([["Registered plan (RRSP, TFSA, etc.)", fmtMoney(li.liquidAssets.regMV), fmtMoney(li.liquidAssets.regLoan), fmtMoney(num(li.liquidAssets.regMV)-num(li.liquidAssets.regLoan))], ["Non-registered investment", fmtMoney(li.liquidAssets.nonRegMV), fmtMoney(li.liquidAssets.nonRegLoan), fmtMoney(num(li.liquidAssets.nonRegMV)-num(li.liquidAssets.nonRegLoan))], ["Bank savings", fmtMoney(li.liquidAssets.bankMV), fmtMoney(li.liquidAssets.bankLoan), fmtMoney(num(li.liquidAssets.bankMV)-num(li.liquidAssets.bankLoan))], ...otherLiquidItems.map(row => [row.name || "Other Liquid Asset", fmtMoney(row.marketValue), fmtMoney(row.loan), fmtMoney(num(row.marketValue)-num(row.loan))])])));
+  w.summary("Total Net Worth (CAD)", fmtMoney(totalNetWorth), { compact: true }); w.summary("ACB of Net Worth", fmtMoney(li.acbNetWorth), { compact: true });
+  w.section("Client Information", () => w.fields([["Client's Name", li.clientName], ["Occupation", li.occupation], ["Age", li.age], ["Industry", li.industry], ["Earned Income", fmtMoney(li.earnedIncome)], ["Unearned Income", fmtMoney(li.unearnedIncome)], ["Spouse Income", fmtMoney(li.spouseIncome)]], 2), 14, { compact: true });
+  w.section("Canadian Fixed Assets", () => w.table(["Asset", "Market Value", "Mortgage & LOC", "Net Worth"], pdfRows([["Principal Residence", fmtMoney(li.fixedAssets.principalMV), fmtMoney(li.fixedAssets.principalLoan), fmtMoney(num(li.fixedAssets.principalMV)-num(li.fixedAssets.principalLoan))], ...investmentProperties.map(row => [row.name || "Investment Property", fmtMoney(row.marketValue), fmtMoney(row.loan), fmtMoney(num(row.marketValue)-num(row.loan))])]), null, { compact: true }), 12, { compact: true });
+  w.section("Canadian Liquid Assets", () => w.table(["Asset", "Market Value", "Loan", "Net Worth"], pdfRows([["Registered plan (RRSP, TFSA, etc.)", fmtMoney(li.liquidAssets.regMV), fmtMoney(li.liquidAssets.regLoan), fmtMoney(num(li.liquidAssets.regMV)-num(li.liquidAssets.regLoan))], ["Non-registered investment", fmtMoney(li.liquidAssets.nonRegMV), fmtMoney(li.liquidAssets.nonRegLoan), fmtMoney(num(li.liquidAssets.nonRegMV)-num(li.liquidAssets.nonRegLoan))], ["Bank savings", fmtMoney(li.liquidAssets.bankMV), fmtMoney(li.liquidAssets.bankLoan), fmtMoney(num(li.liquidAssets.bankMV)-num(li.liquidAssets.bankLoan))], ...otherLiquidItems.map(row => [row.name || "Other Liquid Asset", fmtMoney(row.marketValue), fmtMoney(row.loan), fmtMoney(num(row.marketValue)-num(row.loan))])]), null, { compact: true }), 12, { compact: true });
   w.finishPage();
   w.addPage(); w.header("Business, Foreign Assets & Coverage", "", "Life Insurance Needs Analysis - Page 2");
-  w.section("Business Assets", () => w.table(["Asset", "Annual Revenue", "Annual Net Income", "Business FMV"], pdfRows([["Business values", fmtMoney(li.businessAssets.revenue), fmtMoney(li.businessAssets.netIncome), fmtMoney(li.businessAssets.fmv)]])));
-  w.section("Foreign Assets", () => w.table(["Foreign Asset", "FMV", "Recognized Value", "Net Worth"], pdfRows([["With proof (T1135, bank stmnt, etc)", fmtMoney(li.foreignAssets.withProofFMV), fmtMoney(li.foreignAssets.withProofValue), fmtMoney(li.foreignAssets.withProofValue)], ["Without proof", fmtMoney(li.foreignAssets.withoutProofFMV), fmtMoney(li.foreignAssets.withoutProofValue), fmtMoney(li.foreignAssets.withoutProofValue)]])));
-  w.section("Net Worth Summary", () => w.fields([["Canadian Fixed Assets - Net", fmtMoney(fixedTotalNet)], ["Canadian Liquid Assets - Net", fmtMoney(liqTotalNet)], ["Business FMV", fmtMoney(li.businessAssets.fmv)], ["Foreign Assets Recognized", fmtMoney(num(li.foreignAssets.withProofValue)+num(li.foreignAssets.withoutProofValue))], ["Total Net Worth (CAD)", fmtMoney(totalNetWorth)], ["ACB of Net Worth", fmtMoney(li.acbNetWorth)]], 2));
-  w.summary("Maximum CI Coverage", fmtMoney(maxCI)); w.summary("Maximum Life Coverage", fmtMoney(maxLife)); w.summary("New CI Coverage", fmtMoney(li.newCoverageCI)); w.summary("New Life Coverage", fmtMoney(li.newCoverageLife));
-  w.section("Coverage Calculation", () => w.table(["Item", "Parameter", "Max. CI Coverage", "Max. Life Coverage"], pdfRows([["Critical Illness - Replace Income", `${li.ciIncomeMultiple || "0"} x earned income`, fmtMoney(earned*num(li.ciIncomeMultiple)), ""], ["Critical Illness - Mortgage Protection", `Mortgage: ${fmtMoney(li.ciMortgage)}`, fmtMoney(li.ciMortgage), ""], ["Life Insurance - Replace Income", `${li.lifeIncomeMultiple || "0"} x earned income`, "", fmtMoney(earned*num(li.lifeIncomeMultiple))], ["Life Insurance - Mortgage Protection", `Mortgage: ${fmtMoney(li.lifeMortgage)}`, "", fmtMoney(li.lifeMortgage)], ["Maximum Coverage", "", fmtMoney(maxCI), fmtMoney(maxLife)], ["In-force Coverage", "", fmtMoney(li.inForceCI), fmtMoney(li.inForceLife)], ["New Coverage to be Placed", "", fmtMoney(li.newCoverageCI), fmtMoney(li.newCoverageLife)]])));
-  w.section("Premium Suitability", () => w.summary("Annual Premium", fmtMoney(li.annualPremium)));
+  w.section("Business Assets", () => w.table(["Asset", "Annual Revenue", "Annual Net Income", "Business FMV"], pdfRows([["Business values", fmtMoney(li.businessAssets.revenue), fmtMoney(li.businessAssets.netIncome), fmtMoney(li.businessAssets.fmv)]]), null, { compact: true }), 12, { compact: true });
+  w.section("Foreign Assets", () => w.table(["Foreign Asset", "FMV", "Recognized Value", "Net Worth"], pdfRows([["With proof (T1135, bank stmnt, etc)", fmtMoney(li.foreignAssets.withProofFMV), fmtMoney(li.foreignAssets.withProofValue), fmtMoney(li.foreignAssets.withProofValue)], ["Without proof", fmtMoney(li.foreignAssets.withoutProofFMV), fmtMoney(li.foreignAssets.withoutProofValue), fmtMoney(li.foreignAssets.withoutProofValue)]]), null, { compact: true }), 12, { compact: true });
+  w.section("Net Worth Summary", () => w.fields([["Canadian Fixed Assets - Net", fmtMoney(fixedTotalNet)], ["Canadian Liquid Assets - Net", fmtMoney(liqTotalNet)], ["Business FMV", fmtMoney(li.businessAssets.fmv)], ["Foreign Assets Recognized", fmtMoney(num(li.foreignAssets.withProofValue)+num(li.foreignAssets.withoutProofValue))], ["Total Net Worth (CAD)", fmtMoney(totalNetWorth)], ["ACB of Net Worth", fmtMoney(li.acbNetWorth)]], 2), 14, { compact: true });
+  w.summary("Maximum CI Coverage", fmtMoney(maxCI), { compact: true }); w.summary("Maximum Life Coverage", fmtMoney(maxLife), { compact: true }); w.summary("New CI Coverage", fmtMoney(li.newCoverageCI), { compact: true }); w.summary("New Life Coverage", fmtMoney(li.newCoverageLife), { compact: true });
+  w.section("Coverage Calculation", () => w.table(["Item", "Parameter", "Max. CI Coverage", "Max. Life Coverage"], pdfRows([["Critical Illness - Replace Income", `${li.ciIncomeMultiple || "0"} x earned income`, fmtMoney(earned*num(li.ciIncomeMultiple)), ""], ["Critical Illness - Mortgage Protection", `Mortgage: ${fmtMoney(li.ciMortgage)}`, fmtMoney(li.ciMortgage), ""], ["Life Insurance - Replace Income", `${li.lifeIncomeMultiple || "0"} x earned income`, "", fmtMoney(earned*num(li.lifeIncomeMultiple))], ["Life Insurance - Mortgage Protection", `Mortgage: ${fmtMoney(li.lifeMortgage)}`, "", fmtMoney(li.lifeMortgage)], ["Maximum Coverage", "", fmtMoney(maxCI), fmtMoney(maxLife)], ["In-force Coverage", "", fmtMoney(li.inForceCI), fmtMoney(li.inForceLife)], ["New Coverage to be Placed", "", fmtMoney(li.newCoverageCI), fmtMoney(li.newCoverageLife)]]), null, { compact: true }), 12, { compact: true });
+  w.section("Premium Suitability", () => w.summary("Annual Premium", fmtMoney(li.annualPremium), { compact: true }), 10, { compact: true });
   w.section("Signatures", () => { w.textBlock("I/We confirm that the information presented in this Insurance Needs Analysis has been reviewed with my/our advisor and is accurate to the best of my/our knowledge."); w.signature(li.policyOwnerName || li.clientName, "Policy Owner"); w.signature(li.advisorName || w.profile.advisorName, "Advisor"); });
   w.finishPage();
 };
@@ -5660,19 +5669,31 @@ const App = () => {
   const [profileSelected, setProfileSelected] = useState(() => !!localStorage.getItem(ADVISOR_PROFILE_KEY));
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
-  /* Ensure activeDraftId always points at a real draft */
+  const visibleDrafts = useMemo(
+    () => drafts.filter(d => getDraftAdvisorKey(d) === selectedAdvisorProfileKey),
+    [drafts, selectedAdvisorProfileKey]
+  );
+
+  /* Ensure the selected advisor always has an active draft of their own. */
   useEffect(() => {
-    if (!drafts.length) return;
-    if (!drafts.some(d => d.id === activeDraftId)) setActiveDraftId(drafts[0].id);
-  }, [drafts, activeDraftId]);
+    if (!profileSelected) return;
+    const visible = drafts.filter(d => getDraftAdvisorKey(d) === selectedAdvisorProfileKey);
+    if (visible.length) {
+      if (!visible.some(d => d.id === activeDraftId)) setActiveDraftId(visible[0].id);
+      return;
+    }
+    const blank = makeDraft(null, selectedAdvisorProfileKey);
+    setDrafts(ds => [blank, ...ds]);
+    setActiveDraftId(blank.id);
+  }, [drafts, activeDraftId, selectedAdvisorProfileKey, profileSelected]);
 
   /* Persist on every change */
   useEffect(() => { saveDraftsList(drafts); }, [drafts]);
 
   /* -- derived state for the active draft -- */
   const activeDraft = useMemo(
-    () => drafts.find(d => d.id === activeDraftId) || drafts[0] || makeDraft(),
-    [drafts, activeDraftId]
+    () => visibleDrafts.find(d => d.id === activeDraftId) || visibleDrafts[0] || makeDraft(null, selectedAdvisorProfileKey),
+    [visibleDrafts, activeDraftId, selectedAdvisorProfileKey]
   );
   const formData = activeDraft.formData;
   const activeProfile = getAdvisorProfile(formData?.advisorProfileKey || selectedAdvisorProfileKey);
@@ -5706,11 +5727,17 @@ const App = () => {
     localStorage.setItem(ADVISOR_PROFILE_KEY, profileKey);
     setSelectedAdvisorProfileKey(profileKey);
     setProfileSelected(true);
-    setDrafts(ds => ds.map(d => d.id === activeDraftId
-      ? { ...d, formData: applyAdvisorProfileToFormData(d.formData, profileKey), updatedAt: Date.now() }
-      : d
-    ));
-  }, [activeDraftId]);
+    setDrafts(ds => {
+      const existing = ds.find(d => getDraftAdvisorKey(d) === profileKey);
+      if (existing) {
+        setActiveDraftId(existing.id);
+        return ds;
+      }
+      const blank = makeDraft(null, profileKey);
+      setActiveDraftId(blank.id);
+      return [blank, ...ds];
+    });
+  }, []);
 
   const markManualNamePath = useCallback((path) => {
     setDrafts(ds => ds.map(d => {
@@ -5817,13 +5844,14 @@ const App = () => {
     if (!confirm(`Delete ${name}? This cannot be undone.`)) return;
     setDrafts(ds => {
       const next = ds.filter(x => x.id !== id);
-      // If we just deleted the last one, seed with a blank
-      if (next.length === 0) {
+      const visibleNext = next.filter(x => getDraftAdvisorKey(x) === selectedAdvisorProfileKey);
+      // If we just deleted the last draft for this advisor, seed with a blank current-profile draft.
+      if (visibleNext.length === 0) {
         const blank = makeDraft(null, selectedAdvisorProfileKey);
         setActiveDraftId(blank.id);
-        return [blank];
+        return [blank, ...next];
       }
-      if (id === activeDraftId) setActiveDraftId(next[0].id);
+      if (id === activeDraftId) setActiveDraftId(visibleNext[0].id);
       return next;
     });
   };
@@ -5950,7 +5978,7 @@ const App = () => {
           {/* Left rail — drafts */}
           <div className="col-span-12 lg:col-span-3">
             <DraftsSidebar
-              drafts={drafts}
+              drafts={visibleDrafts}
               activeDraftId={activeDraftId}
               onSwitch={handleSwitchDraft}
               onCreate={handleNewDraft}
