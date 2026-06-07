@@ -4005,33 +4005,39 @@ class PdfWriter {
     this.pdf.text(cleanPdfText(value || " - "), this.x + 3, this.y + (compact ? 9.2 : 12));
     this.y += compact ? 14.5 : 22;
   }
-  optionLine(option, selected, width = this.contentW - 7) {
+  optionLine(option, selected, width = this.contentW - 7, options = {}) {
+    const compact = !!options.compact;
+    const size = compact ? 6.8 : 8.1;
+    const lineH = compact ? 3.0 : 3.9;
     const text = `${option.l}${option.p !== undefined ? ` (${option.p} pts)` : ""}`;
-    const lines = this.textLines(text, width - 9, 8.1);
-    const h = Math.max(5.6, lines.length * 3.9 + 1.3);
+    const lines = this.textLines(text, width - 9, size);
+    const h = Math.max(compact ? 4.4 : 5.6, lines.length * lineH + (compact ? 0.7 : 1.3));
     this.ensure(h + 1);
     this.pdf.setDrawColor(PDF_VEC.navy);
-    this.pdf.rect(this.x + 2, this.y - 3, 3.4, 3.4);
+    this.pdf.rect(this.x + 2, this.y - (compact ? 2.5 : 3), compact ? 3 : 3.4, compact ? 3 : 3.4);
     if (selected) {
-      this.setFont(7, "bold", PDF_VEC.navy);
-      this.pdf.text("X", this.x + 2.75, this.y - 0.2);
+      this.setFont(compact ? 6.2 : 7, "bold", PDF_VEC.navy);
+      this.pdf.text("X", this.x + 2.65, this.y - (compact ? 0.25 : 0.2));
     }
-    this.setFont(8.1, selected ? "bold" : "normal", PDF_VEC.text);
+    this.setFont(size, selected ? "bold" : "normal", PDF_VEC.text);
     this.pdf.text(lines, this.x + 8, this.y);
     this.y += h;
   }
-  questionOptionBlock(question, selectedValue) {
-    const qLines = this.textLines(question.label, this.contentW, 8.7);
+  questionOptionBlock(question, selectedValue, options = {}) {
+    const compact = !!options.compact;
+    const qSize = compact ? 7.25 : 8.7;
+    const qLineH = compact ? 3.2 : 4.2;
+    const qLines = this.textLines(question.label, this.contentW, qSize);
     const firstOptionsH = question.options.slice(0, 2).reduce((s, option) => {
-      const lines = this.textLines(`${option.l}${option.p !== undefined ? ` (${option.p} pts)` : ""}`, this.contentW - 16, 8.1);
-      return s + Math.max(5.6, lines.length * 3.9 + 1.3);
+      const lines = this.textLines(`${option.l}${option.p !== undefined ? ` (${option.p} pts)` : ""}`, this.contentW - 16, compact ? 6.8 : 8.1);
+      return s + Math.max(compact ? 4.4 : 5.6, lines.length * (compact ? 3.0 : 3.9) + (compact ? 0.7 : 1.3));
     }, 0);
-    this.ensure(qLines.length * 4.2 + firstOptionsH + 7);
-    this.setFont(8.7, "bold", PDF_VEC.navy);
+    this.ensure(qLines.length * qLineH + firstOptionsH + (compact ? 4 : 7));
+    this.setFont(qSize, "bold", PDF_VEC.navy);
     this.pdf.text(qLines, this.x, this.y);
-    this.y += qLines.length * 4.2 + 1.5;
-    question.options.forEach(option => this.optionLine(option, choiceMatches(option.l, selectedValue)));
-    this.y += 2.4;
+    this.y += qLines.length * qLineH + (compact ? 0.9 : 1.5);
+    question.options.forEach(option => this.optionLine(option, choiceMatches(option.l, selectedValue), this.contentW - 7, { compact }));
+    this.y += compact ? 1.1 : 2.4;
   }
 }
 const pdfRows = (rows) => rows.map(row => row.map(cell => cleanPdfText(cell)));
@@ -4140,9 +4146,10 @@ const drawAdvisorDisclosureVector = (w, ad, profile) => {
   w.finishPage();
 };
 const drawLeverageVector = (w, lc) => {
+  const denseTable = { dense: true };
   w.addPage(); w.header("CITISTAR FINANCIAL SERVICES LTD.", "Segregated Funds Using Leverage Loan - Know Your Client (KYC)", "Leverage KYC Page 1");
-  w.section("Client Information", () => w.fields([["Last Name of Client", lc.clientLast], ["First Name of Client", lc.clientFirst], ["Last Name of Joint Client", lc.jointLast], ["First Name of Joint Client", lc.jointFirst], ["Leveraging", lc.leveragingType]], 2));
-  w.section("Know-Your-Client (KYC)", () => w.fields([["Client Age", lc.clientAge], ["Joint Applicant Age", lc.jointAge], ["Client Knowledge", lc.clientKnowledge], ["Joint Applicant Knowledge", lc.jointKnowledge], ["Investment Objectives", lc.investmentObjectives], ["Time Horizon", lc.timeHorizon], ["Risk Tolerance - High %", lc.riskHigh], ["Medium %", lc.riskMedium], ["Low %", lc.riskLow]], 2));
+  w.section("Client Information", () => w.fields([["Last Name of Client", lc.clientLast], ["First Name of Client", lc.clientFirst], ["Last Name of Joint Client", lc.jointLast], ["First Name of Joint Client", lc.jointFirst], ["Leveraging", lc.leveragingType]], 2), 14, { compact: true });
+  w.section("Know-Your-Client (KYC)", () => w.fields([["Client Age", lc.clientAge], ["Joint Applicant Age", lc.jointAge], ["Client Knowledge", lc.clientKnowledge], ["Joint Applicant Knowledge", lc.jointKnowledge], ["Investment Objectives", lc.investmentObjectives], ["Time Horizon", lc.timeHorizon], ["Risk Tolerance - High %", lc.riskHigh], ["Medium %", lc.riskMedium], ["Low %", lc.riskLow]], 2), 14, { compact: true });
   w.section("Annual Income From All Sources", () => w.table(["Income Type", "Annual ($)", "Monthly ($)"], pdfRows([
     ["Employment Client", fmtMoney(lc.income.empClient), fmtMoney(lc.incomeMonthly.empClient)],
     ["Employment Joint Applicant", fmtMoney(lc.income.empJoint), fmtMoney(lc.incomeMonthly.empJoint)],
@@ -4150,7 +4157,7 @@ const drawLeverageVector = (w, lc) => {
     ["Rental", fmtMoney(lc.income.rental), fmtMoney(lc.incomeMonthly.rental)],
     ...ensureRows(lc.income.otherItems, makeIncomeOtherRow).map(row => [row.label || "Other", fmtMoney(row.annual), fmtMoney(row.monthly)]),
     ["Total", fmtMoney(lc.income.totalAnnual), fmtMoney(lc.income.totalMonthly)],
-  ])));
+  ]), null, denseTable), 12, { compact: true });
   w.finishPage();
   w.addPage(); w.header("Leverage KYC - Net Worth & Debt", "", "Leverage KYC Page 2");
   w.section("Total Net Worth ($) - New loan + Existing debts should not exceed 30%", () => w.table(["Asset Type", "Client ($)", "Joint Applicant ($)"], pdfRows([
@@ -4159,27 +4166,27 @@ const drawLeverageVector = (w, lc) => {
     ["Fixed Assets", fmtMoney(lc.netWorth.fixedClient), fmtMoney(lc.netWorth.fixedJoint)],
     ...ensureRows(lc.netWorth.otherItems, makeNetWorthOtherRow).map(row => [row.label || "Other", fmtMoney(row.client), fmtMoney(row.joint)]),
     ["Total Net Worth", fmtMoney(lc.netWorth.total), ""],
-  ])));
+  ]), null, denseTable), 12, { compact: true });
   w.section("Total Debt Payments (New loan + Existing loans)", () => {
-    w.table(["Debt Type", "Lender", "Balance Outstanding ($)", "Monthly Payments ($)"], pdfRows((lc.debt || []).map(d => [d.type, d.lender, fmtMoney(d.balance), fmtMoney(d.monthly)])));
+    w.table(["Debt Type", "Lender", "Balance Outstanding ($)", "Monthly Payments ($)"], pdfRows((lc.debt || []).map(d => [d.type, d.lender, fmtMoney(d.balance), fmtMoney(d.monthly)])), null, denseTable);
     w.fields([["Total Liabilities", fmtMoney(lc.totalLiabilities)], ["% of Total Net Worth (<=30%)", lc.liabPctNetWorth], ["Total Monthly Debt Payments", fmtMoney(lc.totalMonthlyDebt)], ["% of Total Annual Income (<=35%)", lc.debtPctIncome]], 2);
-  });
-  w.section("Terms and Conditions of the Leverage Loan", () => w.fields([["Principal Loan Amount", fmtMoney(lc.principalLoan)], ["Loan Start Date", fmtDate(lc.loanStartDate)], ["Payment Amount", fmtMoney(lc.paymentAmount)], ["Payment Type", lc.paymentType]], 2));
+  }, 12, { compact: true });
+  w.section("Terms and Conditions of the Leverage Loan", () => w.fields([["Principal Loan Amount", fmtMoney(lc.principalLoan)], ["Loan Start Date", fmtDate(lc.loanStartDate)], ["Payment Amount", fmtMoney(lc.paymentAmount)], ["Payment Type", lc.paymentType]], 2), 12, { compact: true });
   w.finishPage();
   w.addPage(); w.header("Leverage KYC - Notes & Disclosure", "", "Leverage KYC Page 3");
   w.section("General Client Criteria", () => {
-    ["The presence of ANY of the following KYC criteria should result in determination that leveraging may NOT be suitable:", "- Risk tolerance is low (Where a client's risk tolerance is 100% low, leveraging is not permitted.)", "- Person's age is 60 years or greater / Time horizon is less than 5 years", "- Investment loan > 30% of net worth / Total debt payments > 35% of Gross income", "- Investment knowledge is Poor/None / Client relies on spousal income/net worth / Client unable to withstand financial loss"].forEach(t => w.textBlock(t, { size: 8.8 }));
-  });
-  w.section("Advisor Notes", () => w.longField("Notes", lc.notes, 26));
+    ["The presence of ANY of the following KYC criteria should result in determination that leveraging may NOT be suitable:", "- Risk tolerance is low (Where a client's risk tolerance is 100% low, leveraging is not permitted.)", "- Person's age is 60 years or greater / Time horizon is less than 5 years", "- Investment loan > 30% of net worth / Total debt payments > 35% of Gross income", "- Investment knowledge is Poor/None / Client relies on spousal income/net worth / Client unable to withstand financial loss"].forEach(t => w.textBlock(t, { size: 7.4, lineH: 3.7, gap: 0.8 }));
+  }, 12, { compact: true });
+  w.section("Advisor Notes", () => w.longField("Notes", lc.notes, 16), 10, { compact: true });
   w.section("Leveraging Disclosure", () => {
     [
       ["Risk of Borrowing to Invest", "Using borrowed money to finance the purchase of securities involves greater risk than a purchase using cash resources only. Your responsibility to repay the loan and pay interest remains the same even if the value of the securities purchased declines."],
       ["Is it Right for You?", "Borrowing money to invest is risky. You should only consider it if you are comfortable with taking risk, taking on debt to buy investments that may go up or down in value, investing for the long-term, and you have a stable income."],
       ["You Can End Up Losing Money", "If the investments go down in value and you have borrowed money, your losses would be larger than had you invested using your own money. Whether your investments make money or not, you will still have to pay back the loan plus interest."],
       ["Tax Considerations", "You should not borrow to invest just to receive a tax deduction. Interest costs are not always tax deductible. Consult a tax professional to determine whether your interest costs will be deductible before borrowing to invest."],
-    ].forEach(([h, t]) => { w.textBlock(`${h}: ${t}`, { size: 8.5 }); w.initials(); });
-  });
-  w.section("Client and Advisor Acknowledgement", () => { w.textBlock("I/We have reviewed this Leveraging Analysis & Disclosure with our advisor, and understand the material features and risks involved with this leveraging strategy."); w.signature(lc.clientNameAck, "Client"); if (lc.jointNameAck) w.signature(lc.jointNameAck, "Joint Applicant"); w.signature(lc.advisorNameAck || w.profile.advisorName, "Advisor"); });
+    ].forEach(([h, t]) => { w.textBlock(`${h}: ${t}`, { size: 7.1, lineH: 3.5, gap: 0.6 }); w.initials(); });
+  }, 12, { compact: true });
+  w.section("Client and Advisor Acknowledgement", () => { w.textBlock("I/We have reviewed this Leveraging Analysis & Disclosure with our advisor, and understand the material features and risks involved with this leveraging strategy.", { size: 7.4, lineH: 3.7 }); w.signature(lc.clientNameAck, "Client"); if (lc.jointNameAck) w.signature(lc.jointNameAck, "Joint Applicant"); w.signature(lc.advisorNameAck || w.profile.advisorName, "Advisor"); }, 12, { compact: true });
   w.finishPage();
 };
 const drawNonLeverageVector = (w, nl) => {
@@ -4187,26 +4194,26 @@ const drawNonLeverageVector = (w, nl) => {
   w.field("Client name(s)", nl.clientNames, w.contentW);
   w.section("Client facts", () => {
     w.fields([["Approximate annual income", nl.annualIncome], ["Approximate net worth (includes spouse Y/N)", nl.netWorth], ["Investment knowledge", nl.investmentKnowledge], ["Risk tolerance", nl.riskTolerance], ["Amount to invest ($)", fmtMoney(nl.amountToInvest)], ["Time horizon", nl.timeHorizon]], 2);
-    w.longField("Additional client facts (e.g., date of birth/age, occupation, dependants, financial obligations - assets, liabilities)", nl.additionalFacts, 22);
-    if (nl.amountToInvestNotes) w.longField("Amount to invest notes", nl.amountToInvestNotes, 16);
-  });
+    w.longField("Additional client facts (e.g., date of birth/age, occupation, dependants, financial obligations - assets, liabilities)", nl.additionalFacts, 14);
+    if (nl.amountToInvestNotes) w.longField("Amount to invest notes", nl.amountToInvestNotes, 10);
+  }, 14, { compact: true });
   w.section("Need identification", () => {
-    w.textBlock("Reason(s) for selecting segregated funds", { bold: true, size: 9 });
+    w.textBlock("Reason(s) for selecting segregated funds", { bold: true, size: 7.8, lineH: 3.8, gap: 0.5 });
     w.check(nl.reasons.guarantees, "Guarantees (maturity/death benefit)"); w.check(nl.reasons.probate, "Probate bypass (N/A in Quebec)"); w.check(nl.reasons.creditor, "Creditor protection"); w.check(nl.reasons.other, `Other${nl.reasons.otherText ? ": " + nl.reasons.otherText : ""}`);
-    w.textBlock("Purpose of investment", { bold: true, size: 9 });
+    w.textBlock("Purpose of investment", { bold: true, size: 7.8, lineH: 3.8, gap: 0.5 });
     w.check(nl.purpose.savings, "Savings"); w.check(nl.purpose.estate, "Estate planning"); w.check(nl.purpose.retirement, "Retirement fund"); w.check(nl.purpose.resp, "RESP"); w.check(nl.purpose.other, `Other${nl.purpose.otherText ? ": " + nl.purpose.otherText : ""}`);
-    w.textBlock("Time horizon for investment", { bold: true, size: 9 }); ["1 - 3 years", "4 - 5 years", "6 - 10 years", "More than 10 years"].forEach(v => w.check(nl.timeHorizon === v, v));
-  });
-  w.section("Risk profile (as determined by discussions/details provided by client)", () => w.longField("Risk profile", nl.riskProfile, 18));
+    w.textBlock("Time horizon for investment", { bold: true, size: 7.8, lineH: 3.8, gap: 0.5 }); ["1 - 3 years", "4 - 5 years", "6 - 10 years", "More than 10 years"].forEach(v => w.check(nl.timeHorizon === v, v));
+  }, 12, { compact: true });
+  w.section("Risk profile (as determined by discussions/details provided by client)", () => w.longField("Risk profile", nl.riskProfile, 12), 10, { compact: true });
   w.finishPage();
   w.addPage(); w.header("Sales suitability summary - segregated funds", "", "Sales Suitability continued");
   w.section("Funds recommended / Guarantees / Fee structure", () => {
-    w.textBlock("Funds recommended", { bold: true, size: 9 }); (splitMultiLine(nl.fundsRecommended).length ? splitMultiLine(nl.fundsRecommended) : [" "]).forEach(line => w.textBlock(`- ${line}`, { size: 8.8 }));
-    w.textBlock("Guarantees (maturity/death benefit)", { bold: true, size: 9 }); ["75/75 guarantee", "75/100 guarantee", "100/100 guarantee"].forEach(v => w.check(nl.guarantee === v, v));
-    w.textBlock("Fee structure", { bold: true, size: 9 }); w.check(nl.feeStructure.frontEnd, "Front-end load"); w.check(nl.feeStructure.dsc, "Deferred sales charge"); w.check(nl.feeStructure.lowLoad, "Low-load deferred sales charge"); w.check(nl.feeStructure.other, `Other${nl.feeStructure.otherText ? ": " + nl.feeStructure.otherText : ""}`);
-    w.longField("Support and rationale of fund selection / risk profile / fee structure", nl.rationale, 28);
-  });
-  w.section("Acknowledgement", () => { w.textBlock("I/We have reviewed this Sales Suitability Summary with my advisor and confirm the information above is accurate."); w.signature(nl.clientNames, "Client(s)"); w.signature(w.profile.advisorName, "Advisor"); });
+    w.textBlock("Funds recommended", { bold: true, size: 7.8, lineH: 3.8, gap: 0.5 }); (splitMultiLine(nl.fundsRecommended).length ? splitMultiLine(nl.fundsRecommended) : [" "]).forEach(line => w.textBlock(`- ${line}`, { size: 7.3, lineH: 3.5, gap: 0.2 }));
+    w.textBlock("Guarantees (maturity/death benefit)", { bold: true, size: 7.8, lineH: 3.8, gap: 0.5 }); ["75/75 guarantee", "75/100 guarantee", "100/100 guarantee"].forEach(v => w.check(nl.guarantee === v, v));
+    w.textBlock("Fee structure", { bold: true, size: 7.8, lineH: 3.8, gap: 0.5 }); w.check(nl.feeStructure.frontEnd, "Front-end load"); w.check(nl.feeStructure.dsc, "Deferred sales charge"); w.check(nl.feeStructure.lowLoad, "Low-load deferred sales charge"); w.check(nl.feeStructure.other, `Other${nl.feeStructure.otherText ? ": " + nl.feeStructure.otherText : ""}`);
+    w.longField("Support and rationale of fund selection / risk profile / fee structure", nl.rationale, 16);
+  }, 12, { compact: true });
+  w.section("Acknowledgement", () => { w.textBlock("I/We have reviewed this Sales Suitability Summary with my advisor and confirm the information above is accurate.", { size: 7.4, lineH: 3.7 }); w.signature(nl.clientNames, "Client(s)"); w.signature(w.profile.advisorName, "Advisor"); }, 12, { compact: true });
   w.finishPage();
 };
 const normalizeChoice = (value) => cleanPdfText(value).replace(/\s+/g, " ").trim();
@@ -4215,27 +4222,30 @@ const questionnaireScore = (questions, data) => questions.reduce((sum, question)
   const selected = question.options.find(option => choiceMatches(option.l, data?.[question.key]));
   return sum + (selected ? selected.p : 0);
 }, 0);
-const drawQuestionOptions = (w, questions, data) => questions.forEach(question => w.questionOptionBlock(question, data?.[question.key]));
-const drawProfileResult = (w, summaryRows, rangeRows, headers = ["Score range", "Profile"]) => {
+const drawQuestionOptions = (w, questions, data, options = {}) => questions.forEach(question => w.questionOptionBlock(question, data?.[question.key], options));
+const drawProfileResult = (w, summaryRows, rangeRows, headers = ["Score range", "Profile"], options = {}) => {
+  const compact = !!options.compact;
   const gap = 8;
   const colW = (w.contentW - gap) / 2;
-  w.ensure(20);
+  w.ensure(compact ? 16 : 20);
   const y0 = w.y;
   summaryRows.slice(0, 2).forEach((row, idx) => {
     const x = w.x + idx * (colW + gap);
-    w.setFont(9.2, "bold", PDF_VEC.navy);
+    w.setFont(compact ? 7.8 : 9.2, "bold", PDF_VEC.navy);
     w.pdf.text(cleanPdfText(row[0]), x, y0);
-    const valueLines = w.textLines(row[1] || " - ", colW, 12.2);
-    w.setFont(12.2, "bold", PDF_VEC.navy);
-    w.pdf.text(valueLines, x, y0 + 7);
+    const valueLines = w.textLines(row[1] || " - ", colW, compact ? 10.2 : 12.2);
+    w.setFont(compact ? 10.2 : 12.2, "bold", PDF_VEC.navy);
+    w.pdf.text(valueLines, x, y0 + (compact ? 5.5 : 7));
   });
   w.pdf.setDrawColor(PDF_VEC.gold);
   w.pdf.setLineWidth(0.25);
-  w.pdf.line(w.x, y0 + 15.5, w.x + w.contentW, y0 + 15.5);
-  w.y = y0 + 21;
+  w.pdf.line(w.x, y0 + (compact ? 12.4 : 15.5), w.x + w.contentW, y0 + (compact ? 12.4 : 15.5));
+  w.y = y0 + (compact ? 15.8 : 21);
   w.table(headers, pdfRows(rangeRows), headers.length === 3 ? [34, 34, w.contentW - 68] : [w.contentW * 0.42, w.contentW * 0.58], {
     headerFill: "#F7F5EE",
     headerText: PDF_VEC.navy,
+    compact,
+    dense: compact,
   });
 };
 const manulifeQuestions = [
@@ -4293,10 +4303,10 @@ const drawInsuranceQuestionnaireVector = (w, sf) => {
     const score = questionnaireScore(manulifeQuestions, m);
     const profile = score === 0 ? "" : score <= 8 ? "Conservative" : score <= 23 ? "Moderate" : score <= 38 ? "Balanced" : "Growth";
     w.addPage(); w.header("Manulife Investment Management - Investor Profile Questionnaire", "Segregated fund solutions", "Manulife Questionnaire");
-    w.section("Investor Information", () => w.fields([["Salutation", m.salutation], ["Surname", m.surname], ["First Name", m.firstName], ["Initials", m.initials], ["Date Completed", fmtDate(m.dateCompleted)], ["Address", m.address], ["City", m.city], ["Province", m.province], ["Postal Code", m.postal], ["Home Tel", m.homePhone], ["Business Tel", m.businessPhone], ["Email", m.email], ["Household Income", m.householdIncome], ["Net Financial Assets (incl. spouse)", m.netFinancialAssets], ["Investor Experience", m.experience]], 2));
-    w.section("Investor profile - answer all 8 questions", () => drawQuestionOptions(w, manulifeQuestions, m));
-    w.section("Investor Profile Result", () => drawProfileResult(w, [["Your total score", String(score)], ["My investor profile is", profile || " - "]], [["1-8", "Conservative", "Protecting your money is your chief concern."], ["9-23", "Moderate", "You want your money to grow, but are more concerned about protecting it."], ["24-38", "Balanced", "Balance between growth and security; will accept some risk."], ["39-64", "Growth", "You want to increase your money and can ride the ups and downs."]], ["Score range", "Profile", "Description"]));
-    w.section("Signatures", () => { w.signature(`${m.firstName || ""} ${m.surname || ""}`.trim(), "Client"); w.signature(w.profile.advisorName, "Advisor"); });
+    w.section("Investor Information", () => w.fields([["Salutation", m.salutation], ["Surname", m.surname], ["First Name", m.firstName], ["Initials", m.initials], ["Date Completed", fmtDate(m.dateCompleted)], ["Address", m.address], ["City", m.city], ["Province", m.province], ["Postal Code", m.postal], ["Home Tel", m.homePhone], ["Business Tel", m.businessPhone], ["Email", m.email], ["Household Income", m.householdIncome], ["Net Financial Assets (incl. spouse)", m.netFinancialAssets], ["Investor Experience", m.experience]], 2), 12, { compact: true });
+    w.section("Investor profile - answer all 8 questions", () => drawQuestionOptions(w, manulifeQuestions, m, { compact: true }), 12, { compact: true });
+    w.section("Investor Profile Result", () => drawProfileResult(w, [["Your total score", String(score)], ["My investor profile is", profile || " - "]], [["1-8", "Conservative", "Protecting your money is your chief concern."], ["9-23", "Moderate", "You want your money to grow, but are more concerned about protecting it."], ["24-38", "Balanced", "Balance between growth and security; will accept some risk."], ["39-64", "Growth", "You want to increase your money and can ride the ups and downs."]], ["Score range", "Profile", "Description"], { compact: true }), 12, { compact: true });
+    w.section("Signatures", () => { w.signature(`${m.firstName || ""} ${m.surname || ""}`.trim(), "Client"); w.signature(w.profile.advisorName, "Advisor"); }, 12, { compact: true });
     w.finishPage();
   }
   if (sf.selectedInsuranceCompany === "iA Financial") {
@@ -4304,10 +4314,10 @@ const drawInsuranceQuestionnaireVector = (w, sf) => {
     const score = questionnaireScore(iaQuestions, ia);
     const profile = score === 0 ? "" : score <= 26 ? "Prudent" : score <= 55 ? "Moderate" : score <= 89 ? "Balanced" : score <= 119 ? "Growth" : "Aggressive";
     w.addPage(); w.header("iA FINANCIAL - Your Investor Profile", "F51-122A", "iA FINANCIAL Questionnaire");
-    w.section("Contract / Registration", () => w.fields([["Application Type", ia.applicationType], ["NP Number", ia.npNumber], ["Existing Contract Number", ia.existingContract], ["Type of Registration", Object.keys(ia.registrationType || {}).filter(k => ia.registrationType[k]).join(", ")]], 2));
-    w.section("Information", () => w.fields([["Last and First Name", ia.lastFirstName], ["Date of Birth", fmtDate(ia.dateOfBirth)], ["Profession", ia.profession], ["Employer", ia.employer], ["Employer Since", fmtDate(ia.employerSince)], ["Last Financial Planning", fmtDate(ia.lastFinPlanning)], ["Last Will/Estate Planning", fmtDate(ia.lastWillPlanning)], ["Financial Objectives", ia.financialObjectives]], 2));
-    w.section("Questionnaire", () => drawQuestionOptions(w, iaQuestions, ia));
-    w.section("Investor Profile Result", () => drawProfileResult(w, [["Total points", String(score)], ["Investor profile", profile || " - "]], [["From 8 to 26 points", "Prudent profile"], ["From 27 to 55 points", "Moderate profile"], ["From 56 to 89 points", "Balanced profile"], ["From 90 to 119 points", "Growth profile"], ["From 120 to 160 points", "Aggressive profile"]]));
+    w.section("Contract / Registration", () => w.fields([["Application Type", ia.applicationType], ["NP Number", ia.npNumber], ["Existing Contract Number", ia.existingContract], ["Type of Registration", Object.keys(ia.registrationType || {}).filter(k => ia.registrationType[k]).join(", ")]], 2), 12, { compact: true });
+    w.section("Information", () => w.fields([["Last and First Name", ia.lastFirstName], ["Date of Birth", fmtDate(ia.dateOfBirth)], ["Profession", ia.profession], ["Employer", ia.employer], ["Employer Since", fmtDate(ia.employerSince)], ["Last Financial Planning", fmtDate(ia.lastFinPlanning)], ["Last Will/Estate Planning", fmtDate(ia.lastWillPlanning)], ["Financial Objectives", ia.financialObjectives]], 2), 12, { compact: true });
+    w.section("Questionnaire", () => drawQuestionOptions(w, iaQuestions, ia, { compact: true }), 12, { compact: true });
+    w.section("Investor Profile Result", () => drawProfileResult(w, [["Total points", String(score)], ["Investor profile", profile || " - "]], [["From 8 to 26 points", "Prudent profile"], ["From 27 to 55 points", "Moderate profile"], ["From 56 to 89 points", "Balanced profile"], ["From 90 to 119 points", "Growth profile"], ["From 120 to 160 points", "Aggressive profile"]], undefined, { compact: true }), 12, { compact: true });
     w.section("Your investor profile results", () => {
       w.longField("Choice of investments", ia.choiceOfInvestments, 18);
       w.fields([["Does your choice correspond to your investor profile?", ia.choiceMatchesProfile], ["Signed in (city)", ia.signedIn], ["On (date)", fmtDate(ia.signedDate)]], 2);
@@ -4317,8 +4327,8 @@ const drawInsuranceQuestionnaireVector = (w, sf) => {
         w.initials("Client's initials");
       }
       w.textBlock("I have reviewed this investor profile, I recognize it is accurate and I confirm having received a copy of it.", { size: 8.8 });
-    });
-    w.section("Signatures", () => { w.signature(ia.lastFirstName, "Client"); w.signature(ia.agentName || w.profile.advisorName, "Agent"); w.initials("Client Initials"); });
+    }, 12, { compact: true });
+    w.section("Signatures", () => { w.signature(ia.lastFirstName, "Client"); w.signature(ia.agentName || w.profile.advisorName, "Agent"); w.initials("Client Initials"); }, 12, { compact: true });
     w.finishPage();
   }
   if (sf.selectedInsuranceCompany === "Canada Life") {
@@ -4327,12 +4337,12 @@ const drawInsuranceQuestionnaireVector = (w, sf) => {
     const personality = score === 0 ? "" : score <= 105 ? "Conservative" : score <= 135 ? "Moderate" : score <= 164 ? "Balanced" : score <= 199 ? "Advanced" : "Aggressive";
     const sectionTitles = { 1:"Section one - Investment objectives", 2:"Section two - Personal information", 3:"Section three - Investment horizons", 4:"Section four - Attitude towards risk", 5:"Section five - Portfolio volatility" };
     w.addPage(); w.header("Canada Life - Investment Personality Questionnaire", "Group wealth | Investments", "Canada Life Questionnaire");
-    [1,2,3,4,5].forEach(sec => w.section(sectionTitles[sec], () => drawQuestionOptions(w, canadaQuestions.filter(question => question.sec === sec), c)));
+    [1,2,3,4,5].forEach(sec => w.section(sectionTitles[sec], () => drawQuestionOptions(w, canadaQuestions.filter(question => question.sec === sec), c, { compact: true }), 12, { compact: true }));
     w.section("Investment personality result", () => {
-      drawProfileResult(w, [["Final total", String(score)], ["Investment personality", personality || " - "]], [["105 or less", "Conservative"], ["106 to 135", "Moderate"], ["136 to 164", "Balanced"], ["165 to 199", "Advanced"], ["200 or more", "Aggressive"]]);
+      drawProfileResult(w, [["Final total", String(score)], ["Investment personality", personality || " - "]], [["105 or less", "Conservative"], ["106 to 135", "Moderate"], ["136 to 164", "Balanced"], ["165 to 199", "Advanced"], ["200 or more", "Aggressive"]], undefined, { compact: true });
       w.fields([["Name", c.name], ["Date", fmtDate(c.date)]], 2);
-    });
-    w.section("Signatures", () => { w.signature(c.name, "Client"); w.signature(w.profile.advisorName, "Advisor"); });
+    }, 12, { compact: true });
+    w.section("Signatures", () => { w.signature(c.name, "Client"); w.signature(w.profile.advisorName, "Advisor"); }, 12, { compact: true });
     w.finishPage();
   }
   if (sf.selectedInsuranceCompany === "Equitable Life") {
@@ -4340,13 +4350,13 @@ const drawInsuranceQuestionnaireVector = (w, sf) => {
     const score = questionnaireScore(equitableQuestions, e);
     const profile = score === 0 ? "" : score <= 7 ? "Minimal Risk" : score <= 16 ? "Conservative" : score <= 25 ? "Moderate Conservative" : score <= 34 ? "Balanced" : score <= 42 ? "Growth" : "Aggressive Growth";
     w.addPage(); w.header("Equitable Investor Profile Questionnaire", "", "Equitable Questionnaire");
-    w.textBlock("Before you invest, it's important to understand your investor profile. This short questionnaire will help you identify your investment style - based on your goals, comfort with risk, and time horizon. Your results will point you to one of six investor styles, helping you choose a portfolio that best aligns with your needs.", { size: 8.6, lineH: 4.6 });
-    w.section("Investor Profile Questionnaire", () => drawQuestionOptions(w, equitableQuestions, e));
+    w.textBlock("Before you invest, it's important to understand your investor profile. This short questionnaire will help you identify your investment style - based on your goals, comfort with risk, and time horizon. Your results will point you to one of six investor styles, helping you choose a portfolio that best aligns with your needs.", { size: 7.2, lineH: 3.6, gap: 1 });
+    w.section("Investor Profile Questionnaire", () => drawQuestionOptions(w, equitableQuestions, e, { compact: true }), 12, { compact: true });
     w.section("Investor Profile Result", () => {
-      drawProfileResult(w, [["Total Score", String(score)], ["Investor profile type", profile || " - "]], [["0-7", "Minimal Risk"], ["8-16", "Conservative"], ["17-25", "Moderate Conservative"], ["26-34", "Balanced"], ["35-42", "Growth"], ["43-50", "Aggressive Growth"]]);
+      drawProfileResult(w, [["Total Score", String(score)], ["Investor profile type", profile || " - "]], [["0-7", "Minimal Risk"], ["8-16", "Conservative"], ["17-25", "Moderate Conservative"], ["26-34", "Balanced"], ["35-42", "Growth"], ["43-50", "Aggressive Growth"]], undefined, { compact: true });
       w.prominentField("Client Name", e.clientName, w.contentW);
-    });
-    w.section("Signatures", () => { w.signature(e.clientName, "Client"); w.signature(w.profile.advisorName, "Advisor"); });
+    }, 12, { compact: true });
+    w.section("Signatures", () => { w.signature(e.clientName, "Client"); w.signature(w.profile.advisorName, "Advisor"); }, 12, { compact: true });
     w.finishPage();
   }
 };
@@ -4514,6 +4524,8 @@ const drawLifeReasonWhyVector = (w, data) => {
   const ctx = lifeReasonWhyContext(data);
   const rawBlocks = stripReasonWhyLeadingTitles(reasonWhyBodyBlocks(body), { accountLabel: ctx.productType });
   if (!rawBlocks.length) return;
+  w.preventAutoPageBreak = false;
+  w.currentHeader = null;
   w.addPage({ margin: PDF_VEC.reasonMargin });
   w.reasonHeader("Reason Why Letter", ctx.productType);
   for (let i = 0; i < rawBlocks.length; i++) {
