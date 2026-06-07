@@ -4337,18 +4337,16 @@ const drawLifeInsuranceVector = (w, li) => {
   const earned = num(li.earnedIncome);
   const maxCI = earned * num(li.ciIncomeMultiple) + num(li.ciMortgage);
   const maxLife = earned * num(li.lifeIncomeMultiple) + num(li.lifeMortgage);
-  w.addPage(); w.header("Insurance Needs Analysis", "", "Life Insurance Needs Analysis - Client & Assets");
+  w.addPage(); w.header("Insurance Needs Analysis", "", "Life Insurance Needs Analysis - Page 1");
   w.summary("Total Net Worth (CAD)", fmtMoney(totalNetWorth)); w.summary("ACB of Net Worth", fmtMoney(li.acbNetWorth));
   w.section("Client Information", () => w.fields([["Client's Name", li.clientName], ["Occupation", li.occupation], ["Age", li.age], ["Industry", li.industry], ["Earned Income", fmtMoney(li.earnedIncome)], ["Unearned Income", fmtMoney(li.unearnedIncome)], ["Spouse Income", fmtMoney(li.spouseIncome)]], 2));
   w.section("Canadian Fixed Assets", () => w.table(["Asset", "Market Value", "Mortgage & LOC", "Net Worth"], pdfRows([["Principal Residence", fmtMoney(li.fixedAssets.principalMV), fmtMoney(li.fixedAssets.principalLoan), fmtMoney(num(li.fixedAssets.principalMV)-num(li.fixedAssets.principalLoan))], ...investmentProperties.map(row => [row.name || "Investment Property", fmtMoney(row.marketValue), fmtMoney(row.loan), fmtMoney(num(row.marketValue)-num(row.loan))])])));
   w.section("Canadian Liquid Assets", () => w.table(["Asset", "Market Value", "Loan", "Net Worth"], pdfRows([["Registered plan (RRSP, TFSA, etc.)", fmtMoney(li.liquidAssets.regMV), fmtMoney(li.liquidAssets.regLoan), fmtMoney(num(li.liquidAssets.regMV)-num(li.liquidAssets.regLoan))], ["Non-registered investment", fmtMoney(li.liquidAssets.nonRegMV), fmtMoney(li.liquidAssets.nonRegLoan), fmtMoney(num(li.liquidAssets.nonRegMV)-num(li.liquidAssets.nonRegLoan))], ["Bank savings", fmtMoney(li.liquidAssets.bankMV), fmtMoney(li.liquidAssets.bankLoan), fmtMoney(num(li.liquidAssets.bankMV)-num(li.liquidAssets.bankLoan))], ...otherLiquidItems.map(row => [row.name || "Other Liquid Asset", fmtMoney(row.marketValue), fmtMoney(row.loan), fmtMoney(num(row.marketValue)-num(row.loan))])])));
   w.finishPage();
-  w.addPage(); w.header("Business & Foreign Assets", "", "Life Insurance Needs Analysis - Asset Details");
+  w.addPage(); w.header("Business, Foreign Assets & Coverage", "", "Life Insurance Needs Analysis - Page 2");
   w.section("Business Assets", () => w.table(["Asset", "Annual Revenue", "Annual Net Income", "Business FMV"], pdfRows([["Business values", fmtMoney(li.businessAssets.revenue), fmtMoney(li.businessAssets.netIncome), fmtMoney(li.businessAssets.fmv)]])));
   w.section("Foreign Assets", () => w.table(["Foreign Asset", "FMV", "Recognized Value", "Net Worth"], pdfRows([["With proof (T1135, bank stmnt, etc)", fmtMoney(li.foreignAssets.withProofFMV), fmtMoney(li.foreignAssets.withProofValue), fmtMoney(li.foreignAssets.withProofValue)], ["Without proof", fmtMoney(li.foreignAssets.withoutProofFMV), fmtMoney(li.foreignAssets.withoutProofValue), fmtMoney(li.foreignAssets.withoutProofValue)]])));
   w.section("Net Worth Summary", () => w.fields([["Canadian Fixed Assets - Net", fmtMoney(fixedTotalNet)], ["Canadian Liquid Assets - Net", fmtMoney(liqTotalNet)], ["Business FMV", fmtMoney(li.businessAssets.fmv)], ["Foreign Assets Recognized", fmtMoney(num(li.foreignAssets.withProofValue)+num(li.foreignAssets.withoutProofValue))], ["Total Net Worth (CAD)", fmtMoney(totalNetWorth)], ["ACB of Net Worth", fmtMoney(li.acbNetWorth)]], 2));
-  w.finishPage();
-  w.addPage(); w.header("Coverage & Premium Suitability", "", "Life Insurance Needs Analysis - Coverage");
   w.summary("Maximum CI Coverage", fmtMoney(maxCI)); w.summary("Maximum Life Coverage", fmtMoney(maxLife)); w.summary("New CI Coverage", fmtMoney(li.newCoverageCI)); w.summary("New Life Coverage", fmtMoney(li.newCoverageLife));
   w.section("Coverage Calculation", () => w.table(["Item", "Parameter", "Max. CI Coverage", "Max. Life Coverage"], pdfRows([["Critical Illness - Replace Income", `${li.ciIncomeMultiple || "0"} x earned income`, fmtMoney(earned*num(li.ciIncomeMultiple)), ""], ["Critical Illness - Mortgage Protection", `Mortgage: ${fmtMoney(li.ciMortgage)}`, fmtMoney(li.ciMortgage), ""], ["Life Insurance - Replace Income", `${li.lifeIncomeMultiple || "0"} x earned income`, "", fmtMoney(earned*num(li.lifeIncomeMultiple))], ["Life Insurance - Mortgage Protection", `Mortgage: ${fmtMoney(li.lifeMortgage)}`, "", fmtMoney(li.lifeMortgage)], ["Maximum Coverage", "", fmtMoney(maxCI), fmtMoney(maxLife)], ["In-force Coverage", "", fmtMoney(li.inForceCI), fmtMoney(li.inForceLife)], ["New Coverage to be Placed", "", fmtMoney(li.newCoverageCI), fmtMoney(li.newCoverageLife)]])));
   w.section("Premium Suitability", () => w.summary("Annual Premium", fmtMoney(li.annualPremium)));
@@ -4392,6 +4390,31 @@ const drawReasonWhyVector = (w, data, fromAttachment = false) => {
     w.textBlock(CLIENT_ACK_TEXT, { size: 9.2, lineH: 5.0, gap: 3.2 });
   }
   w.signature(ctx.clientName, "Client");
+  w.finishPage();
+};
+const drawLifeReasonWhyVector = (w, data) => {
+  const li = data.lifeInsurance?.needsAnalysis || {};
+  const ad = data.advisorDisclosure || {};
+  const clientName = li.clientName || fullClientName(ad) || "Client";
+  const productType = coverProductType(data);
+  const advisorName = li.advisorName || w.profile.advisorName;
+  const coverageParts = [
+    Number(li.newCoverageLife || 0) > 0 ? `new life insurance coverage of ${fmtMoney(li.newCoverageLife)}` : "",
+    Number(li.newCoverageCI || 0) > 0 ? `new critical illness coverage of ${fmtMoney(li.newCoverageCI)}` : "",
+  ].filter(Boolean);
+  const coverageText = coverageParts.length ? coverageParts.join(" and ") : "the insurance coverage discussed during our review";
+  w.addPage({ margin: PDF_VEC.reasonMargin });
+  w.reasonHeader("Reason Why Letter", productType);
+  w.textBlock(`${fmtLongDate(todayISO())}\n\nDear ${clientName},`, { size: 9.4, lineH: 5.0, gap: 3.2 });
+  w.textBlock("Recommendation", { size: 10.2, lineH: 4.7, bold: true, gap: 2.5 });
+  w.textBlock(`Based on our recent meeting and the Life Insurance Needs Analysis we completed together, I am recommending ${coverageText}. This recommendation is based on the personal and financial information you provided, including your occupation, age, income, existing coverage, assets, liabilities, and stated insurance planning needs.`, { size: 9.25, lineH: 5.1, gap: 3.2 });
+  w.textBlock("How This Recommendation Meets Your Needs", { size: 10.2, lineH: 4.7, bold: true, gap: 2.5 });
+  w.textBlock(`The coverage amount was reviewed against the needs analysis calculations, including income replacement, mortgage or debt protection, existing in-force coverage, and premium suitability. The annual premium reviewed for this recommendation is ${fmtMoney(li.annualPremium) || "the premium discussed with you"}.`, { size: 9.25, lineH: 5.1, gap: 3.2 });
+  w.textBlock("Important Notice", { size: 10.2, lineH: 4.7, bold: true, gap: 2.5 });
+  w.textBlock(`If any information in this letter or in the Life Insurance Needs Analysis is not correct, please contact ${advisorName} right away so the recommendation can be reviewed and updated before the application is finalized. Please keep this letter with your policy and needs analysis records.`, { size: 9.25, lineH: 5.1, gap: 3.2 });
+  w.textBlock("Client Acknowledgement", { size: 10.2, lineH: 4.7, bold: true, gap: 2.5 });
+  w.textBlock(CLIENT_ACK_TEXT, { size: 9.25, lineH: 5.1, gap: 3.2 });
+  w.signature(clientName, "Client");
   w.finishPage();
 };
 const missingHasText = (value) => cleanPdfText(value).trim().length > 0;
@@ -4545,7 +4568,7 @@ const buildVectorPdf = async (data) => {
   if (isSegFund) {
     const rw = makeReasonWhy(sf.reasonWhy);
     if (reasonWhyHasAttachment(rw) && rw.attachment.kind === "docx" && hasText(rw.attachment.text)) drawReasonWhyVector(w, data, true);
-    if (!reasonWhyHasAttachment(rw) && rw.include !== false) {
+    if (!reasonWhyHasAttachment(rw)) {
       let reasonWhyData = data;
       const accountType = reasonWhyAccountType(rw);
       if (!hasText(rw.body)) {
@@ -4563,7 +4586,10 @@ const buildVectorPdf = async (data) => {
       drawReasonWhyVector(w, reasonWhyData, false);
     }
   }
-  if (isLifeIns) drawLifeInsuranceVector(w, data.lifeInsurance.needsAnalysis || {});
+  if (isLifeIns) {
+    drawLifeInsuranceVector(w, data.lifeInsurance.needsAnalysis || {});
+    drawLifeReasonWhyVector(w, data);
+  }
   return pdf;
 };
 
