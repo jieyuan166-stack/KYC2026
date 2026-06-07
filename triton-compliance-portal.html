@@ -607,6 +607,8 @@ function normalizeFormData(formData) {
   fd.advisorDisclosure = fd.advisorDisclosure || {};
   fd.segregatedFundInvestment = fd.segregatedFundInvestment || {};
   fd.segregatedFundInvestment.reasonWhy = makeReasonWhy(fd.segregatedFundInvestment.reasonWhy);
+  fd.lifeInsurance = fd.lifeInsurance || {};
+  fd.lifeInsurance.reasonWhy = makeReasonWhy(fd.lifeInsurance.reasonWhy);
   applyDefaultTodayDates(fd);
 
   const lc = fd.segregatedFundInvestment?.leverageCompliance;
@@ -834,6 +836,14 @@ const initialFormData = {
     }
   },
   lifeInsurance: {
+    reasonWhy: {
+      include: true,
+      accountType: "Life Insurance",
+      generatedAccountType: "Life Insurance",
+      body: "",
+      sourceSnapshot: null,
+      attachment: makeReasonWhyAttachment(),
+    },
     needsAnalysis: {
       clientName: "", occupation: "", age: "", industry: "",
       earnedIncome: "", unearnedIncome: "", spouseIncome: "",
@@ -2860,6 +2870,8 @@ const REASON_WHY_TITLE_LINES = new Set([
   "Three-Year Attribution Rule",
   "Disclosures",
   "Risk Disclosures",
+  "Recommendation",
+  "How This Recommendation Meets Your Needs",
   "Alternatives Considered",
   "Important Notice",
   "Client Acknowledgement",
@@ -4392,29 +4404,66 @@ const drawReasonWhyVector = (w, data, fromAttachment = false) => {
   w.signature(ctx.clientName, "Client");
   w.finishPage();
 };
-const drawLifeReasonWhyVector = (w, data) => {
+const lifeReasonWhyContext = (data) => {
   const li = data.lifeInsurance?.needsAnalysis || {};
   const ad = data.advisorDisclosure || {};
   const clientName = li.clientName || fullClientName(ad) || "Client";
   const productType = coverProductType(data);
-  const advisorName = li.advisorName || w.profile.advisorName;
   const coverageParts = [
     Number(li.newCoverageLife || 0) > 0 ? `new life insurance coverage of ${fmtMoney(li.newCoverageLife)}` : "",
     Number(li.newCoverageCI || 0) > 0 ? `new critical illness coverage of ${fmtMoney(li.newCoverageCI)}` : "",
   ].filter(Boolean);
-  const coverageText = coverageParts.length ? coverageParts.join(" and ") : "the insurance coverage discussed during our review";
+  return {
+    clientName,
+    productType,
+    advisorName: li.advisorName || getAdvisorProfile(data.advisorProfileKey).advisorName,
+    coverageText: coverageParts.length ? coverageParts.join(" and ") : "the insurance coverage discussed during our review",
+    annualPremium: fmtMoney(li.annualPremium) || "the premium discussed with you",
+  };
+};
+const lifeReasonWhySourceSnapshot = (data) => {
+  const ctx = lifeReasonWhyContext(data);
+  return {
+    clientName: ctx.clientName,
+    productType: ctx.productType,
+    coverageText: ctx.coverageText,
+    annualPremium: ctx.annualPremium,
+    date: todayISO(),
+  };
+};
+const generateLifeReasonWhyBody = (data) => {
+  const ctx = lifeReasonWhyContext(data);
+  return stripTemplatePlaceholders(`REASON WHY LETTER
+${ctx.productType}
+${fmtLongDate(todayISO())}
+
+Dear ${ctx.clientName},
+
+Recommendation
+Based on our recent meeting and the Life Insurance Needs Analysis we completed together, I am recommending ${ctx.coverageText}. This recommendation is based on the personal and financial information you provided, including your occupation, age, income, existing coverage, assets, liabilities, and stated insurance planning needs.
+
+How This Recommendation Meets Your Needs
+The coverage amount was reviewed against the needs analysis calculations, including income replacement, mortgage or debt protection, existing in-force coverage, and premium suitability. The annual premium reviewed for this recommendation is ${ctx.annualPremium}.
+
+Important Notice
+If any information in this letter or in the Life Insurance Needs Analysis is not correct, please contact ${ctx.advisorName} right away so the recommendation can be reviewed and updated before the application is finalized. Please keep this letter with your policy and needs analysis records.
+
+Client Acknowledgement
+I acknowledge that I have reviewed this Reason Why Letter and understand the rationale for the recommendation described above.`);
+};
+const drawLifeReasonWhyVector = (w, data) => {
+  const rw = makeReasonWhy(data.lifeInsurance?.reasonWhy);
+  const body = hasText(rw.body) ? rw.body : generateLifeReasonWhyBody(data);
+  const ctx = lifeReasonWhyContext(data);
+  const rawBlocks = stripReasonWhyLeadingTitles(reasonWhyBodyBlocks(body), { accountLabel: ctx.productType });
+  if (!rawBlocks.length) return;
   w.addPage({ margin: PDF_VEC.reasonMargin });
-  w.reasonHeader("Reason Why Letter", productType);
-  w.textBlock(`${fmtLongDate(todayISO())}\n\nDear ${clientName},`, { size: 9.4, lineH: 5.0, gap: 3.2 });
-  w.textBlock("Recommendation", { size: 10.2, lineH: 4.7, bold: true, gap: 2.5 });
-  w.textBlock(`Based on our recent meeting and the Life Insurance Needs Analysis we completed together, I am recommending ${coverageText}. This recommendation is based on the personal and financial information you provided, including your occupation, age, income, existing coverage, assets, liabilities, and stated insurance planning needs.`, { size: 9.25, lineH: 5.1, gap: 3.2 });
-  w.textBlock("How This Recommendation Meets Your Needs", { size: 10.2, lineH: 4.7, bold: true, gap: 2.5 });
-  w.textBlock(`The coverage amount was reviewed against the needs analysis calculations, including income replacement, mortgage or debt protection, existing in-force coverage, and premium suitability. The annual premium reviewed for this recommendation is ${fmtMoney(li.annualPremium) || "the premium discussed with you"}.`, { size: 9.25, lineH: 5.1, gap: 3.2 });
-  w.textBlock("Important Notice", { size: 10.2, lineH: 4.7, bold: true, gap: 2.5 });
-  w.textBlock(`If any information in this letter or in the Life Insurance Needs Analysis is not correct, please contact ${advisorName} right away so the recommendation can be reviewed and updated before the application is finalized. Please keep this letter with your policy and needs analysis records.`, { size: 9.25, lineH: 5.1, gap: 3.2 });
-  w.textBlock("Client Acknowledgement", { size: 10.2, lineH: 4.7, bold: true, gap: 2.5 });
-  w.textBlock(CLIENT_ACK_TEXT, { size: 9.25, lineH: 5.1, gap: 3.2 });
-  w.signature(clientName, "Client");
+  w.reasonHeader("Reason Why Letter", ctx.productType);
+  rawBlocks.forEach(block => {
+    if (block.type === "heading") w.textBlock(block.text, { size: 10.2, lineH: 4.7, bold: true, gap: 2.5 });
+    else w.textBlock(block.text, { size: 9.25, lineH: 5.1, gap: 3.2 });
+  });
+  w.signature(ctx.clientName, "Client");
   w.finishPage();
 };
 const missingHasText = (value) => cleanPdfText(value).trim().length > 0;
@@ -4811,6 +4860,22 @@ const reasonWhyHasAttachment = (reasonWhy) => {
   return (attachment.kind === "pdf" && !!attachment.dataUrl) || (attachment.kind === "docx" && hasText(attachment.text));
 };
 const effectiveReasonWhyData = (data) => {
+  if (data?.businessType === "Life Insurance") {
+    const rw = makeReasonWhy(data.lifeInsurance?.reasonWhy);
+    if (hasText(rw.body)) return data;
+    const effectiveData = deepClone(data);
+    const body = generateLifeReasonWhyBody(effectiveData);
+    effectiveData.lifeInsurance = effectiveData.lifeInsurance || {};
+    effectiveData.lifeInsurance.reasonWhy = {
+      ...rw,
+      include: true,
+      accountType: "Life Insurance",
+      generatedAccountType: "Life Insurance",
+      body,
+      sourceSnapshot: lifeReasonWhySourceSnapshot(effectiveData),
+    };
+    return effectiveData;
+  }
   if (data?.businessType !== "Segregated Fund Investment") return data;
   const sf = data.segregatedFundInvestment || {};
   const rw = makeReasonWhy(sf.reasonWhy);
@@ -4996,6 +5061,41 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
       sourceSnapshot: reasonWhySourceSnapshot(nextData),
     });
   }, [data.businessType, reasonWhy.accountType, reasonWhy.body]);
+  const lifeReasonWhy = makeReasonWhy(data.lifeInsurance?.reasonWhy);
+  const setLifeReasonWhy = (patch) => update("lifeInsurance", {
+    ...data.lifeInsurance,
+    reasonWhy: { ...lifeReasonWhy, ...patch },
+  });
+  const regenerateLifeReasonWhy = () => {
+    const nextData = {
+      ...data,
+      lifeInsurance: { ...data.lifeInsurance, reasonWhy: { ...lifeReasonWhy, accountType: "Life Insurance" } },
+    };
+    setLifeReasonWhy({
+      include: true,
+      accountType: "Life Insurance",
+      generatedAccountType: "Life Insurance",
+      body: generateLifeReasonWhyBody(nextData),
+      sourceSnapshot: lifeReasonWhySourceSnapshot(nextData),
+    });
+  };
+  const lifeReasonWhyCtx = lifeReasonWhyContext(data);
+  const lifeReasonWhySourceChanged = hasText(lifeReasonWhy.body) && !sameReasonWhySnapshot(lifeReasonWhy.sourceSnapshot, lifeReasonWhySourceSnapshot(data));
+  useEffect(() => {
+    if (data.businessType !== "Life Insurance") return;
+    if (hasText(lifeReasonWhy.body)) return;
+    const nextData = {
+      ...data,
+      lifeInsurance: { ...data.lifeInsurance, reasonWhy: { ...lifeReasonWhy, accountType: "Life Insurance" } },
+    };
+    setLifeReasonWhy({
+      include: true,
+      accountType: "Life Insurance",
+      generatedAccountType: "Life Insurance",
+      body: generateLifeReasonWhyBody(nextData),
+      sourceSnapshot: lifeReasonWhySourceSnapshot(nextData),
+    });
+  }, [data.businessType, lifeReasonWhy.body]);
   const li = data.lifeInsurance.needsAnalysis;
   const isSegFund = data.businessType === "Segregated Fund Investment";
   const isLifeIns = data.businessType === "Life Insurance";
@@ -5227,6 +5327,34 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
             </div>
             <ReviewSignaturePlaceholder label={`Policy Owner signature${li.policyOwnerName ? " (" + li.policyOwnerName + ")" : ""}`} />
             <ReviewSignaturePlaceholder label={`Advisor signature${li.advisorName ? " (" + li.advisorName + ")" : ""}`} />
+          </ReviewPanel>
+        )}
+
+        {isLifeIns && (
+          <ReviewPanel title="4. Reason Why Letter">
+            <ReviewSummaryRow label="Client name" value={lifeReasonWhyCtx.clientName}/>
+            <ReviewSummaryRow label="Product / coverage type" value={lifeReasonWhyCtx.productType}/>
+            <ReviewSummaryRow label="Coverage recommendation" value={lifeReasonWhyCtx.coverageText}/>
+            <ReviewSummaryRow label="Annual premium" value={lifeReasonWhyCtx.annualPremium}/>
+            {lifeReasonWhySourceChanged && (
+              <div className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                Source information changed since this Reason Why Letter was generated. Regenerate from current KYC data to update the client name, product type, coverage, and premium.
+              </div>
+            )}
+            <div className="flex flex-wrap items-center gap-2 mt-3 mb-2">
+              <button type="button" onClick={regenerateLifeReasonWhy} className="px-3 py-2 border border-navy text-navy rounded hover:bg-navy hover:text-white text-xs font-semibold">Regenerate from current KYC data</button>
+              {lifeReasonWhy.generatedAccountType && <span className="text-xs text-gray-500">Generated from: Life Insurance template</span>}
+            </div>
+            {hasText(lifeReasonWhy.body) ? (
+              <div className="mt-3">
+                <Field label="Editable Reason Why Letter preview">
+                  <TextArea value={lifeReasonWhy.body} onChange={v => setLifeReasonWhy({ body: v })} rows={18}/>
+                </Field>
+              </div>
+            ) : (
+              <div className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-3">Template preview will be generated automatically from the Life Insurance Needs Analysis.</div>
+            )}
+            <div className="mt-2 text-xs text-gray-600">PDF will use this editable preview and include client signature and date boxes only.</div>
           </ReviewPanel>
         )}
 
