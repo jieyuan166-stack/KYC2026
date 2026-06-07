@@ -3802,7 +3802,6 @@ class PdfWriter {
     this.y += 7;
   }
   reasonHeader(title, subtitle, continued = false) {
-    this.ensure(26);
     this.currentHeader = { kind: "reason", title, subtitle };
     this.setFont(15, "bold", PDF_VEC.text);
     this.pdf.text(title, PDF_MM.w / 2, this.y, { align: "center" });
@@ -4364,7 +4363,7 @@ const drawLifeInsuranceVector = (w, li) => {
   w.section("Canadian Fixed Assets", () => w.table(["Asset", "Market Value", "Mortgage & LOC", "Net Worth"], pdfRows([["Principal Residence", fmtMoney(li.fixedAssets.principalMV), fmtMoney(li.fixedAssets.principalLoan), fmtMoney(num(li.fixedAssets.principalMV)-num(li.fixedAssets.principalLoan))], ...investmentProperties.map(row => [row.name || "Investment Property", fmtMoney(row.marketValue), fmtMoney(row.loan), fmtMoney(num(row.marketValue)-num(row.loan))])]), null, { compact: true }), 12, { compact: true });
   w.section("Canadian Liquid Assets", () => w.table(["Asset", "Market Value", "Loan", "Net Worth"], pdfRows([["Registered plan (RRSP, TFSA, etc.)", fmtMoney(li.liquidAssets.regMV), fmtMoney(li.liquidAssets.regLoan), fmtMoney(num(li.liquidAssets.regMV)-num(li.liquidAssets.regLoan))], ["Non-registered investment", fmtMoney(li.liquidAssets.nonRegMV), fmtMoney(li.liquidAssets.nonRegLoan), fmtMoney(num(li.liquidAssets.nonRegMV)-num(li.liquidAssets.nonRegLoan))], ["Bank savings", fmtMoney(li.liquidAssets.bankMV), fmtMoney(li.liquidAssets.bankLoan), fmtMoney(num(li.liquidAssets.bankMV)-num(li.liquidAssets.bankLoan))], ...otherLiquidItems.map(row => [row.name || "Other Liquid Asset", fmtMoney(row.marketValue), fmtMoney(row.loan), fmtMoney(num(row.marketValue)-num(row.loan))])]), null, { compact: true }), 12, { compact: true });
   w.finishPage();
-  w.addPage(); w.header("Business, Foreign Assets & Coverage", "", "Life Insurance Needs Analysis - Page 2");
+  w.addPage(); w.header("Insurance Needs Analysis", "Business, Foreign Assets & Coverage", "Life Insurance Needs Analysis - Page 2");
   w.section("Business Assets", () => w.table(["Asset", "Annual Revenue", "Annual Net Income", "Business FMV"], pdfRows([["Business values", fmtMoney(li.businessAssets.revenue), fmtMoney(li.businessAssets.netIncome), fmtMoney(li.businessAssets.fmv)]]), null, { compact: true }), 12, { compact: true });
   w.section("Foreign Assets", () => w.table(["Foreign Asset", "FMV", "Recognized Value", "Net Worth"], pdfRows([["With proof (T1135, bank stmnt, etc)", fmtMoney(li.foreignAssets.withProofFMV), fmtMoney(li.foreignAssets.withProofValue), fmtMoney(li.foreignAssets.withProofValue)], ["Without proof", fmtMoney(li.foreignAssets.withoutProofFMV), fmtMoney(li.foreignAssets.withoutProofValue), fmtMoney(li.foreignAssets.withoutProofValue)]]), null, { compact: true }), 12, { compact: true });
   w.section("Net Worth Summary", () => w.fields([["Canadian Fixed Assets - Net", fmtMoney(fixedTotalNet)], ["Canadian Liquid Assets - Net", fmtMoney(liqTotalNet)], ["Business FMV", fmtMoney(li.businessAssets.fmv)], ["Foreign Assets Recognized", fmtMoney(num(li.foreignAssets.withProofValue)+num(li.foreignAssets.withoutProofValue))], ["Total Net Worth (CAD)", fmtMoney(totalNetWorth)], ["ACB of Net Worth", fmtMoney(li.acbNetWorth)]], 2), 14, { compact: true });
@@ -4468,10 +4467,24 @@ const drawLifeReasonWhyVector = (w, data) => {
   if (!rawBlocks.length) return;
   w.addPage({ margin: PDF_VEC.reasonMargin });
   w.reasonHeader("Reason Why Letter", ctx.productType);
-  rawBlocks.forEach(block => {
+  for (let i = 0; i < rawBlocks.length; i++) {
+    const block = rawBlocks[i];
+    const next = rawBlocks[i + 1];
+    let keepH = reasonBlockHeight(w, block);
+    if (block.type === "heading" && next?.type === "paragraph") keepH += reasonBlockHeight(w, next);
+    if (w.y + keepH > 258) {
+      w.finishPage();
+      w.addPage({ margin: PDF_VEC.reasonMargin });
+      w.reasonHeader("Reason Why Letter", ctx.productType, true);
+    }
     if (block.type === "heading") w.textBlock(block.text, { size: 10.2, lineH: 4.7, bold: true, gap: 2.5 });
     else w.textBlock(block.text, { size: 9.25, lineH: 5.1, gap: 3.2 });
-  });
+  }
+  if (w.y + 34 > 258) {
+    w.finishPage();
+    w.addPage({ margin: PDF_VEC.reasonMargin });
+    w.reasonHeader("Reason Why Letter", ctx.productType, true);
+  }
   w.signature(ctx.clientName, "Client");
   w.finishPage();
 };
