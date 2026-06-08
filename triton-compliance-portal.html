@@ -4382,11 +4382,11 @@ const drawLifeInsuranceVector = (w, li) => {
     fn();
     w.y += 1.6;
   };
-  const denseSummaryGrid = (items) => {
+  const denseSummaryGrid = (items, columns = 2) => {
     const gap = 3;
-    const colW = (w.contentW - gap) / 2;
-    for (let i = 0; i < items.length; i += 2) {
-      const row = items.slice(i, i + 2);
+    const colW = (w.contentW - gap * (columns - 1)) / columns;
+    for (let i = 0; i < items.length; i += columns) {
+      const row = items.slice(i, i + columns);
       const y0 = w.y;
       row.forEach((item, idx) => {
         const x = w.x + idx * (colW + gap);
@@ -4402,31 +4402,32 @@ const drawLifeInsuranceVector = (w, li) => {
     }
   };
   const denseSignatureRow = () => {
-    const signatureTop = Math.min(Math.max(w.y + 2, 220), 224);
+    const signatureTop = Math.max(w.y + 3, 219);
     w.y = signatureTop;
-    lifeSection("Signatures", () => {
-      w.setFont(6.8, "normal", PDF_VEC.text);
-      w.pdf.text(w.textLines("I/We confirm that the information presented in this Insurance Needs Analysis has been reviewed with my/our advisor and is accurate to the best of my/our knowledge.", w.contentW, 6.8), w.x, w.y);
-      w.y += 8.5;
-      const gap = 8;
-      const groupW = (w.contentW - gap) / 2;
-      const sigW = groupW - 38;
-      const dateW = 34;
-      const y0 = w.y;
-      [[li.policyOwnerName || li.clientName, "Policy Owner"], [li.advisorName || w.profile.advisorName, "Advisor"]].forEach((item, idx) => {
-        const x = w.x + idx * (groupW + gap);
-        w.setFont(8.2, "bold", PDF_VEC.navy);
-        w.pdf.text(cleanPdfText(item[0] || item[1]), x, y0);
-        w.setFont(6.4, "bold", PDF_VEC.navy);
-        w.pdf.text(`${item[1]} Signature`, x, y0 + 5);
-        w.pdf.text("Date", x + sigW + 4, y0 + 5);
-        w.pdf.setFillColor("#FFFFFF");
-        w.pdf.setDrawColor(PDF_VEC.gold);
-        w.pdf.rect(x, y0 + 7, sigW, 10.5, "FD");
-        w.pdf.rect(x + sigW + 4, y0 + 7, dateW, 10.5, "FD");
-      });
-      w.y = y0 + 19.5;
+    w.setFont(8.4, "bold", PDF_VEC.navy);
+    w.pdf.text("Signatures", w.x, w.y);
+    w.y += 4.5;
+    w.setFont(6.8, "normal", PDF_VEC.text);
+    w.pdf.text(w.textLines("I/We confirm that the information presented in this Insurance Needs Analysis has been reviewed with my/our advisor and is accurate to the best of my/our knowledge.", w.contentW, 6.8), w.x, w.y);
+    w.y += 8.5;
+    const gap = 8;
+    const groupW = (w.contentW - gap) / 2;
+    const sigW = groupW - 38;
+    const dateW = 34;
+    const y0 = w.y;
+    [[li.policyOwnerName || li.clientName, "Policy Owner"], [li.advisorName || w.profile.advisorName, "Advisor"]].forEach((item, idx) => {
+      const x = w.x + idx * (groupW + gap);
+      w.setFont(8.2, "bold", PDF_VEC.navy);
+      w.pdf.text(cleanPdfText(item[0] || item[1]), x, y0);
+      w.setFont(6.4, "bold", PDF_VEC.navy);
+      w.pdf.text(`${item[1]} Signature`, x, y0 + 5);
+      w.pdf.text("Date", x + sigW + 4, y0 + 5);
+      w.pdf.setFillColor("#FFFFFF");
+      w.pdf.setDrawColor(PDF_VEC.gold);
+      w.pdf.rect(x, y0 + 7, sigW, 10.5, "FD");
+      w.pdf.rect(x + sigW + 4, y0 + 7, dateW, 10.5, "FD");
     });
+    w.y = y0 + 19.5;
   };
   w.addPage(); w.header("Insurance Needs Analysis", "", "Life Insurance Needs Analysis - Page 1");
   denseSummaryGrid([["Total Net Worth (CAD)", fmtMoney(totalNetWorth)], ["ACB of Net Worth", fmtMoney(li.acbNetWorth)]]);
@@ -4438,9 +4439,8 @@ const drawLifeInsuranceVector = (w, li) => {
   w.y -= 7;
   lifeSection("Business Assets", () => w.table(["Asset", "Annual Revenue", "Annual Net Income", "Business FMV"], pdfRows([["Business values", fmtMoney(li.businessAssets.revenue), fmtMoney(li.businessAssets.netIncome), fmtMoney(li.businessAssets.fmv)]]), null, denseTable));
   lifeSection("Foreign Assets", () => w.table(["Foreign Asset", "FMV", "Recognized Value", "Net Worth"], pdfRows([["With proof (T1135, bank stmnt, etc)", fmtMoney(li.foreignAssets.withProofFMV), fmtMoney(li.foreignAssets.withProofValue), fmtMoney(li.foreignAssets.withProofValue)], ["Without proof", fmtMoney(li.foreignAssets.withoutProofFMV), fmtMoney(li.foreignAssets.withoutProofValue), fmtMoney(li.foreignAssets.withoutProofValue)]]), null, denseTable));
-  lifeSection("Net Worth Summary", () => w.table(["Item", "Amount"], pdfRows([["Canadian Fixed Assets - Net", fmtMoney(fixedTotalNet)], ["Canadian Liquid Assets - Net", fmtMoney(liqTotalNet)], ["Business FMV", fmtMoney(li.businessAssets.fmv)], ["Foreign Assets Recognized", fmtMoney(num(li.foreignAssets.withProofValue)+num(li.foreignAssets.withoutProofValue))], ["Total Net Worth (CAD)", fmtMoney(totalNetWorth)], ["ACB of Net Worth", fmtMoney(li.acbNetWorth)]]), [w.contentW * 0.58, w.contentW * 0.42], denseTable));
-  denseSummaryGrid([["Maximum CI Coverage", fmtMoney(maxCI)], ["Maximum Life Coverage", fmtMoney(maxLife)], ["New CI Coverage", fmtMoney(li.newCoverageCI)], ["New Life Coverage", fmtMoney(li.newCoverageLife)], ["Annual Premium", fmtMoney(li.annualPremium)], ["Premium Suitability", "Reviewed"]]);
-  lifeSection("Coverage Calculation", () => w.table(["Item", "Parameter", "Max. CI", "Max. Life"], pdfRows([["CI - Replace Income", `${li.ciIncomeMultiple || "0"} x earned income`, fmtMoney(earned*num(li.ciIncomeMultiple)), ""], ["CI - Mortgage Protection", `Mortgage: ${fmtMoney(li.ciMortgage)}`, fmtMoney(li.ciMortgage), ""], ["Life - Replace Income", `${li.lifeIncomeMultiple || "0"} x earned income`, "", fmtMoney(earned*num(li.lifeIncomeMultiple))], ["Life - Mortgage Protection", `Mortgage: ${fmtMoney(li.lifeMortgage)}`, "", fmtMoney(li.lifeMortgage)], ["Maximum Coverage", "", fmtMoney(maxCI), fmtMoney(maxLife)], ["In-force Coverage", "", fmtMoney(li.inForceCI), fmtMoney(li.inForceLife)], ["New Coverage to be Placed", "", fmtMoney(li.newCoverageCI), fmtMoney(li.newCoverageLife)]]), null, denseTable));
+  lifeSection("Net Worth Summary", () => denseSummaryGrid([["Fixed Assets - Net", fmtMoney(fixedTotalNet)], ["Liquid Assets - Net", fmtMoney(liqTotalNet)], ["Business FMV", fmtMoney(li.businessAssets.fmv)], ["Foreign Assets", fmtMoney(num(li.foreignAssets.withProofValue)+num(li.foreignAssets.withoutProofValue))], ["Total Net Worth", fmtMoney(totalNetWorth)], ["ACB of Net Worth", fmtMoney(li.acbNetWorth)]], 3));
+  lifeSection("Coverage & Premium", () => w.table(["Item", "Critical Illness", "Life Insurance"], pdfRows([["Income replacement", `${li.ciIncomeMultiple || "0"} x income = ${fmtMoney(earned*num(li.ciIncomeMultiple))}`, `${li.lifeIncomeMultiple || "0"} x income = ${fmtMoney(earned*num(li.lifeIncomeMultiple))}`], ["Mortgage protection", fmtMoney(li.ciMortgage), fmtMoney(li.lifeMortgage)], ["Maximum coverage", fmtMoney(maxCI), fmtMoney(maxLife)], ["In-force coverage", fmtMoney(li.inForceCI), fmtMoney(li.inForceLife)], ["New coverage to be placed", fmtMoney(li.newCoverageCI), fmtMoney(li.newCoverageLife)], ["Annual premium / suitability", fmtMoney(li.annualPremium), "Reviewed"]]), [w.contentW * 0.34, w.contentW * 0.33, w.contentW * 0.33], denseTable));
   denseSignatureRow();
   w.finishPage();
 };
