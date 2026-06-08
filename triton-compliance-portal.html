@@ -4050,6 +4050,7 @@ const pairRows = (items) => {
 };
 const drawShiyunAdvisorDisclosureVector = (w, ad, profile) => {
   const carriers = ["CANADA LIFE", "MANULIFE", "SUN LIFE", "EQUITABLE LIFE", "iA FINANCIAL", "DESJARDINS", "BMO INSURANCE", "FORESTERS", "CPP", "TUGO"];
+  const shiyunCaslConsent = "I consent to receiving electronic communications from Shiyun Qiu about my insurance and/or investment needs and coverage and information about products and services that might benefit me. I understand that I may withdraw my consent at any time.";
   w.addPage(); w.header("Insurance Disclosure and Privacy Consent", `${profile.advisorName}, Independent Advisor, ${profile.firmName}`, "");
   w.section("Insurance Disclosure - About me", () => {
     w.textBlock("I am licensed as a life and health insurance agent in following province:", { size: 9.2, lineH: 4.6, gap: 1.2 });
@@ -4089,7 +4090,12 @@ const drawShiyunAdvisorDisclosureVector = (w, ad, profile) => {
     w.textBlock("If you need more information about my privacy policies and/or those of the companies I represent, please let me know.", { size: 8.8, lineH: 4.4, gap: 1.5 });
   });
   w.section("Compliance with Canadian Anti-Spam Law and its Regulations (CASL)", () => {
-    w.textBlock("I consent to receiving electronic communications from Shiyun Qiu about my insurance and/or investment needs and coverage and information about products and services that might benefit me. I understand that I may withdraw my consent at any time.", { size: 8.8, lineH: 4.4, gap: 1.5 });
+    w.textBlock(shiyunCaslConsent, { size: 8.4, lineH: 4.05, gap: 0.8 });
+  }, 9, { compact: true });
+  w.finishPage();
+  w.addPage();
+  w.header("Insurance Disclosure and Privacy Consent", "", "");
+  w.section("Compliance with Canadian Anti-Spam Law and its Regulations (CASL) - continued", () => {
     w.textBlock("By signing below, you give your consent to collect and maintain your personal information in your client file and consent to receiving electronic communications.", { size: 8.8, lineH: 4.4, bold: true, gap: 1.5 });
   });
   w.section("Acknowledgment and Consent", () => {
@@ -4102,49 +4108,51 @@ const drawShiyunAdvisorDisclosureVector = (w, ad, profile) => {
 };
 const drawAdvisorDisclosureVector = (w, ad, profile) => {
   if (profile.key === "shiyun") return drawShiyunAdvisorDisclosureVector(w, ad, profile);
+  const body = (text, opts = {}) => w.textBlock(text, { size: 8.65, lineH: 4.18, gap: 1.05, ...opts });
+  const small = (text, opts = {}) => w.textBlock(text, { size: 8.15, lineH: 3.95, gap: 0.85, ...opts });
   w.addPage(); w.header("Insurance Disclosure and Privacy Consent", "Jie Yuan, Independent Advisor, Triton Wealth Management Corp.", "Page 1 of 3");
   w.section("Insurance Disclosure - About me", () => {
-    w.textBlock("I am licensed as a life and health insurance agent in following province:");
-    w.textBlock("AB, BC and ON", { bold: true });
-    w.textBlock("I am also licensed/registered in the following fields:");
-    w.textBlock("Mutual Funds & Exempt market business in AB and BC, contracting through Portfolio Strategies Corporation.", { bold: true });
-  });
+    body("I am licensed as a life and health insurance agent in following province:");
+    body("AB, BC and ON", { bold: true });
+    body("I am also licensed/registered in the following fields:");
+    body("Mutual Funds & Exempt market business in AB and BC, contracting through Portfolio Strategies Corporation.", { bold: true });
+  }, 10, { compact: true });
   w.section("Companies I represent", () => {
-    w.textBlock("I represent the following insurers to market their products which include life insurance, critical illness insurance, disability insurance, travel insurance, group insurance, and segregated funds through Citistar Financial Services Ltd., a Managing General Agency (MGA):");
-    w.table(["Name of Business / Insurance Carriers"], [["CANADA LIFE"], ["MANULIFE"], ["SUN LIFE"], ["EQUITABLE LIFE"], ["iA FINANCIAL"]]);
-    w.textBlock("For my other occupation, I have a business relationship with 1264670 BC Ltd. and J Yuan Holding Ltd. Under this arrangement, I provide Mutual Funds & Exempt market services through 1264670 BC Ltd. Compensation for these services is commission-based. I have an ownership interest in both 1264670 BC Ltd. and J Yuan Holding Ltd.");
-  });
+    body("I represent the following insurers to market their products which include life insurance, critical illness insurance, disability insurance, travel insurance, group insurance, and segregated funds through Citistar Financial Services Ltd., a Managing General Agency (MGA):");
+    w.table(["Name of Business / Insurance Carriers"], [["CANADA LIFE"], ["MANULIFE"], ["SUN LIFE"], ["EQUITABLE LIFE"], ["iA FINANCIAL"]], null, { compact: true, dense: true });
+    small("For my other occupation, I have a business relationship with 1264670 BC Ltd. and J Yuan Holding Ltd. Under this arrangement, I provide Mutual Funds & Exempt market services through 1264670 BC Ltd. Compensation for these services is commission-based. I have an ownership interest in both 1264670 BC Ltd. and J Yuan Holding Ltd.");
+  }, 10, { compact: true });
   w.section("Nature of relationship with insurance company(ies) I represent", () => {
-    w.textBlock("In the event that you decide to purchase life insurance products through me, you understand that life insurance products purchased are separate from and not contingent on activities involving Mutual Funds & Exempt market services. Furthermore, no Insurer holds ownership interest in Jie Yuan/Triton Wealth Management Corp., and Jie Yuan/Triton Wealth Management Corp. does not hold an ownership interest in any Insurer.");
-    w.textBlock("I will notify you immediately of any other existing or perceived conflict of interest that may relate to any life insurance recommendation that I make if they arise.");
-  });
+    body("In the event that you decide to purchase life insurance products through me, you understand that life insurance products purchased are separate from and not contingent on activities involving Mutual Funds & Exempt market services. Furthermore, no Insurer holds ownership interest in Jie Yuan/Triton Wealth Management Corp., and Jie Yuan/Triton Wealth Management Corp. does not hold an ownership interest in any Insurer.");
+    body("I will notify you immediately of any other existing or perceived conflict of interest that may relate to any life insurance recommendation that I make if they arise.");
+  }, 10, { compact: true });
   w.finishPage();
   w.addPage(); w.header("Insurance Disclosure and Privacy Consent", "", "Page 2 of 3");
   w.section("Insurance Compensation", () => {
-    w.textBlock("I am compensated by sales commission on policies I sell and may receive a renewal (or service) commission on policies that remain active. Commissions are paid by the insurance company that provides the product you purchased. For certain products I may receive a referral fee.");
-    w.textBlock("I may be eligible for additional compensation and other benefits, such as bonuses and professional conferences which may be based on my sales reaching a certain level. I may also be entitled to participate in a share purchase plan.");
-  });
-  w.section("Potential conflict or conflict of interest", () => w.textBlock("My position/profession as a business owner of 1264670 BC Ltd and J Yuan holding Ltd. may be perceived to be a potential conflict of interest with respect to my recommendations to you. However, I confirm that my recommendations will be based solely on my assessment of your needs."));
+    body("I am compensated by sales commission on policies I sell and may receive a renewal (or service) commission on policies that remain active. Commissions are paid by the insurance company that provides the product you purchased. For certain products I may receive a referral fee.");
+    body("I may be eligible for additional compensation and other benefits, such as bonuses and professional conferences which may be based on my sales reaching a certain level. I may also be entitled to participate in a share purchase plan.");
+  }, 10, { compact: true });
+  w.section("Potential conflict or conflict of interest", () => body("My position/profession as a business owner of 1264670 BC Ltd and J Yuan holding Ltd. may be perceived to be a potential conflict of interest with respect to my recommendations to you. However, I confirm that my recommendations will be based solely on my assessment of your needs."), 10, { compact: true });
   w.section("Privacy commitment and your client file", () => {
-    w.textBlock("Protecting the privacy of your personal information is important to me and the companies whose products and services I offer, and I'm committed to collecting, using and disclosing your personal information responsibly. The personal information being collected, such as contact information, financial information, medical information, as well as records of meetings and phone calls, general correspondence and any instructions you provide to me, will be maintained by me or at my direction in paper and/or electronic format in a client file.");
-    w.textBlock("Your personal information in your client file will be disclosed only to:");
-    w.textBlock("- Me or my firm's employees, my MGA - Citistar Financial and employees and persons authorized by me or by my firm;", { size: 9 });
-    w.textBlock("- Companies whose products and services I offer and their employees and agents, for the purpose of providing financial products or services to you;", { size: 9 });
-    w.textBlock("- Persons or entities to which you have granted access or that are allowed access by law.", { size: 9 });
-    w.textBlock("In accordance with applicable law and by your written request, you have the right to review the personal information in your client file, request corrections to this information, and revoke your consent subject to contractual limitations.");
-  });
+    body("Protecting the privacy of your personal information is important to me and the companies whose products and services I offer, and I'm committed to collecting, using and disclosing your personal information responsibly. The personal information being collected, such as contact information, financial information, medical information, as well as records of meetings and phone calls, general correspondence and any instructions you provide to me, will be maintained by me or at my direction in paper and/or electronic format in a client file.");
+    body("Your personal information in your client file will be disclosed only to:");
+    small("- Me or my firm's employees, my MGA - Citistar Financial and employees and persons authorized by me or by my firm;");
+    small("- Companies whose products and services I offer and their employees and agents, for the purpose of providing financial products or services to you;");
+    small("- Persons or entities to which you have granted access or that are allowed access by law.");
+    body("In accordance with applicable law and by your written request, you have the right to review the personal information in your client file, request corrections to this information, and revoke your consent subject to contractual limitations.");
+  }, 10, { compact: true });
   w.finishPage();
   w.addPage(); w.header("Insurance Disclosure and Privacy Consent", "", "Page 3 of 3");
   w.section("Compliance with Canadian Anti-Spam Law (CASL)", () => {
-    w.textBlock("I consent to receiving electronic communications from Jie Yuan about my insurance and/or investment needs and coverage and information about products and services that might benefit me. I understand that I may withdraw my consent at any time.");
-    w.textBlock("By signing below, you give your consent to collect and maintain your personal information in your client file and consent to receiving electronic communications.", { bold: true });
-  });
+    body("I consent to receiving electronic communications from Jie Yuan about my insurance and/or investment needs and coverage and information about products and services that might benefit me. I understand that I may withdraw my consent at any time.");
+    body("By signing below, you give your consent to collect and maintain your personal information in your client file and consent to receiving electronic communications.", { bold: true });
+  }, 10, { compact: true });
   w.section("Acknowledgment and Consent", () => {
-    w.textBlock(`I, ${ad.clientName || ad.client1Name || "________________"} (Client Name) acknowledge that I have reviewed this document. I understand any conflicts of interest or potential conflicts of interest outlined in this document. I also consent to a client file being created and maintained for me.`);
+    body(`I, ${ad.clientName || ad.client1Name || "________________"} (Client Name) acknowledge that I have reviewed this document. I understand any conflicts of interest or potential conflicts of interest outlined in this document. I also consent to a client file being created and maintained for me.`);
     w.check(ad.spouseConsent, "I consent to my personal information being maintained in a joint client file with my spouse and being disclosed to my spouse. (Requires signature of spouse, if selected.)");
     w.signature(ad.client1Name || ad.clientName, "Client 1");
     if (ad.client2Name || ad.spouseConsent) w.signature(ad.client2Name, "Client 2");
-  });
+  }, 10, { compact: true });
   w.finishPage();
 };
 const drawLeverageVector = (w, lc) => {
@@ -4492,8 +4500,11 @@ const drawReasonWhyVector = (w, data, fromAttachment = false) => {
 const lifeReasonWhyContext = (data) => {
   const li = data.lifeInsurance?.needsAnalysis || {};
   const ad = data.advisorDisclosure || {};
+  const profile = getAdvisorProfile(data.advisorProfileKey);
   const clientName = li.clientName || fullClientName(ad) || "Client";
   const productType = coverProductType(data);
+  const moneyIfPositive = (value, fallback) => Number(value || 0) > 0 ? fmtMoney(value) : fallback;
+  const plainIfText = (value, fallback) => cleanPdfText(value).trim() || fallback;
   const coverageParts = [
     Number(li.newCoverageLife || 0) > 0 ? `new life insurance coverage of ${fmtMoney(li.newCoverageLife)}` : "",
     Number(li.newCoverageCI || 0) > 0 ? `new critical illness coverage of ${fmtMoney(li.newCoverageCI)}` : "",
@@ -4501,9 +4512,24 @@ const lifeReasonWhyContext = (data) => {
   return {
     clientName,
     productType,
-    advisorName: li.advisorName || getAdvisorProfile(data.advisorProfileKey).advisorName,
+    advisorName: li.advisorName || profile.advisorName,
+    firmName: profile.firmName,
     coverageText: coverageParts.length ? coverageParts.join(" and ") : "the insurance coverage discussed during our review",
-    annualPremium: fmtMoney(li.annualPremium) || "the premium discussed with you",
+    age: plainIfText(li.age, "as documented"),
+    occupation: plainIfText(li.occupation, "as documented"),
+    industry: plainIfText(li.industry, "as documented"),
+    earnedIncome: moneyIfPositive(li.earnedIncome, "the income documented in your KYC profile"),
+    unearnedIncome: moneyIfPositive(li.unearnedIncome, "the amount documented in your KYC profile"),
+    spouseIncome: moneyIfPositive(li.spouseIncome, "the amount documented in your KYC profile"),
+    lifeIncomeMultiple: plainIfText(li.lifeIncomeMultiple, "the income replacement multiple discussed with you"),
+    ciIncomeMultiple: plainIfText(li.ciIncomeMultiple, "the income replacement multiple discussed with you"),
+    lifeMortgage: moneyIfPositive(li.lifeMortgage, "the debt or mortgage amount reviewed with you"),
+    ciMortgage: moneyIfPositive(li.ciMortgage, "the debt or mortgage amount reviewed with you"),
+    inForceLife: moneyIfPositive(li.inForceLife, "the existing life insurance documented in your file"),
+    inForceCI: moneyIfPositive(li.inForceCI, "the existing critical illness insurance documented in your file"),
+    newCoverageLife: moneyIfPositive(li.newCoverageLife, "the new life insurance amount discussed with you"),
+    newCoverageCI: moneyIfPositive(li.newCoverageCI, "the new critical illness amount discussed with you"),
+    annualPremium: moneyIfPositive(li.annualPremium, "the premium reviewed with you"),
   };
 };
 const lifeReasonWhySourceSnapshot = (data) => {
@@ -4512,7 +4538,16 @@ const lifeReasonWhySourceSnapshot = (data) => {
     clientName: ctx.clientName,
     productType: ctx.productType,
     coverageText: ctx.coverageText,
+    age: ctx.age,
+    occupation: ctx.occupation,
+    earnedIncome: ctx.earnedIncome,
+    inForceLife: ctx.inForceLife,
+    inForceCI: ctx.inForceCI,
+    newCoverageLife: ctx.newCoverageLife,
+    newCoverageCI: ctx.newCoverageCI,
     annualPremium: ctx.annualPremium,
+    advisorName: ctx.advisorName,
+    firmName: ctx.firmName,
     date: todayISO(),
   };
 };
@@ -4525,16 +4560,31 @@ ${fmtLongDate(todayISO())}
 Dear ${ctx.clientName},
 
 Recommendation
-Based on our recent meeting and the Life Insurance Needs Analysis we completed together, I am recommending ${ctx.coverageText}. This recommendation is based on the personal and financial information you provided, including your occupation, age, income, existing coverage, assets, liabilities, and stated insurance planning needs.
+Based on our recent meeting and the Life Insurance Needs Analysis completed with you, I am recommending ${ctx.coverageText}. This recommendation is intended to address the insurance needs identified during the review, including income replacement, mortgage or debt protection, family protection, estate protection, business continuity, and/or critical illness liquidity, as applicable.
 
-How This Recommendation Meets Your Needs
-The coverage amount was reviewed against the needs analysis calculations, including income replacement, mortgage or debt protection, existing in-force coverage, and premium suitability. The annual premium reviewed for this recommendation is ${ctx.annualPremium}.
+Client Information Reviewed
+In preparing this recommendation, I reviewed the information you provided, including your age (${ctx.age}), occupation (${ctx.occupation}), industry (${ctx.industry}), earned income (${ctx.earnedIncome}), unearned income (${ctx.unearnedIncome}), spouse income (${ctx.spouseIncome}), existing insurance coverage, assets, liabilities, net worth information, business interests, foreign asset considerations, and premium affordability. If any of this information is incomplete or inaccurate, please advise ${ctx.advisorName} before proceeding so the recommendation can be reviewed and updated.
 
-Important Notice
-If any information in this letter or in the Life Insurance Needs Analysis is not correct, please contact ${ctx.advisorName} right away so the recommendation can be reviewed and updated before the application is finalized. Please keep this letter with your policy and needs analysis records.
+Needs Analysis and Coverage Rationale
+The recommended coverage was compared against the needs analysis calculations documented in your file. The life insurance review considered income replacement (${ctx.lifeIncomeMultiple}), mortgage or debt protection (${ctx.lifeMortgage}), existing in-force life insurance (${ctx.inForceLife}), and the additional life insurance amount reviewed (${ctx.newCoverageLife}). The critical illness review considered income replacement (${ctx.ciIncomeMultiple}), mortgage or debt protection (${ctx.ciMortgage}), existing in-force critical illness coverage (${ctx.inForceCI}), and the additional critical illness amount reviewed (${ctx.newCoverageCI}). Based on this review, the recommendation is suitable for the needs and priorities documented during our discussion, subject to insurer underwriting and final policy approval.
+
+Premium Suitability
+The annual premium reviewed for this recommendation is ${ctx.annualPremium}. We discussed the importance of keeping the premium affordable within your current cash flow and financial obligations. You should contact ${ctx.advisorName} if your income, expenses, debt obligations, family circumstances, business situation, or ability to maintain the policy changes.
+
+Product Suitability and Alternatives
+The recommended product type is ${ctx.productType}. We reviewed the purpose of the coverage, the type and amount of insurance, premium structure, underwriting requirements, relevant exclusions and limitations, and the fact that approval is subject to the insurer's underwriting process. Alternatives such as different coverage amounts, different product types, delaying coverage, or relying on existing coverage were considered where relevant.
+
+Important Disclosures
+Insurance recommendations are based on the information available at the time of the analysis and are not a guarantee of future needs. Policy benefits, premiums, exclusions, limitations, renewability, convertibility, cash values, and other features are governed by the insurer's policy contract and approved illustration, where applicable. You should review the application, illustration, policy contract, product disclosure documents, and any insurer notices carefully before accepting the policy.
+
+Next Steps
+If you agree with this recommendation, the application will be submitted to the insurer for underwriting. No coverage is in force unless and until the insurer approves the application, all delivery requirements are satisfied, and any required premium is paid. Please keep this Reason Why Letter with your Life Insurance Needs Analysis and policy records.
+
+Advisor and Firm
+This recommendation was prepared by ${ctx.advisorName} through ${ctx.firmName}.
 
 Client Acknowledgement
-I acknowledge that I have reviewed this Reason Why Letter and understand the rationale for the recommendation described above.`);
+I acknowledge that I have reviewed this Reason Why Letter and understand the rationale for the recommendation described above. I confirm that the information used for this recommendation is accurate to the best of my knowledge and that I have had the opportunity to ask questions before proceeding.`);
 };
 const drawLifeReasonWhyVector = (w, data) => {
   const rw = makeReasonWhy(data.lifeInsurance?.reasonWhy);
