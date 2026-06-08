@@ -4051,60 +4051,75 @@ const pairRows = (items) => {
 const drawShiyunAdvisorDisclosureVector = (w, ad, profile) => {
   const carriers = ["CANADA LIFE", "MANULIFE", "SUN LIFE", "EQUITABLE LIFE", "iA FINANCIAL", "DESJARDINS", "BMO INSURANCE", "FORESTERS", "CPP", "TUGO"];
   const shiyunCaslConsent = "I consent to receiving electronic communications from Shiyun Qiu about my insurance and/or investment needs and coverage and information about products and services that might benefit me. I understand that I may withdraw my consent at any time.";
-  w.addPage(); w.header("Insurance Disclosure and Privacy Consent", `${profile.advisorName}, Independent Advisor, ${profile.firmName}`, "");
-  w.section("Insurance Disclosure - About me", () => {
-    w.textBlock("I am licensed as a life and health insurance agent in following province:", { size: 9.2, lineH: 4.6, gap: 1.2 });
-    w.textBlock("AB, BC and ON", { size: 9.2, lineH: 4.6, bold: true, gap: 1.8 });
-    w.textBlock("I am also licensed/registered in the following fields:", { size: 9.2, lineH: 4.6, gap: 1.2 });
-    w.textBlock("Exempt market business in BC and AB, contracting through Enoch Wealth Inc.", { size: 9.2, lineH: 4.6, bold: true, gap: 1.2 });
+  const previousPageBreakSetting = w.preventAutoPageBreak;
+  const body = (text, opts = {}) => w.textBlock(text, { size: 7.9, lineH: 3.72, gap: 0.65, ...opts });
+  const small = (text, opts = {}) => w.textBlock(text, { size: 7.55, lineH: 3.48, gap: 0.5, ...opts });
+  const disclosureSection = (title, fn) => {
+    w.pdf.setFillColor(PDF_VEC.navy);
+    w.pdf.rect(w.x, w.y - 1.2, w.contentW, 6.1, "F");
+    w.pdf.setFillColor(PDF_VEC.gold);
+    w.pdf.rect(w.x, w.y - 1.2, 0.8, 6.1, "F");
+    w.setFont(8.1, "bold", "#FFFFFF");
+    w.pdf.text(cleanPdfText(title), w.x + 4, w.y + 2.9);
+    w.y += 8.5;
+    fn();
+    w.y += 1.5;
+  };
+  w.preventAutoPageBreak = true;
+  w.addPage(); w.header("Insurance Disclosure and Privacy Consent", `${profile.advisorName}, Independent Advisor, ${profile.firmName}`, "Page 1 of 3");
+  disclosureSection("Insurance Disclosure - About me", () => {
+    body("I am licensed as a life and health insurance agent in following province:");
+    body("AB, BC and ON", { bold: true });
+    body("I am also licensed/registered in the following fields:");
+    body("Exempt market business in BC and AB, contracting through Enoch Wealth Inc.", { bold: true });
   });
-  w.section("Companies I represent", () => {
-    w.textBlock("I represent the following insurers to market their products which include life insurance, critical illness insurance, disability insurance, travel insurance, group insurance, and segregated funds through Citistar Financial Services Ltd., a Managing General Agency (MGA):", { size: 9.1, lineH: 4.6, gap: 1.8 });
-    w.table(["Name of Business / Insurance Carriers", "Name of Business / Insurance Carriers"], pairRows(carriers), [w.contentW / 2, w.contentW / 2]);
+  disclosureSection("Companies I represent", () => {
+    body("I represent the following insurers to market their products which include life insurance, critical illness insurance, disability insurance, travel insurance, group insurance, and segregated funds through Citistar Financial Services Ltd., a Managing General Agency (MGA):");
+    w.table(["Name of Business / Insurance Carriers", "Name of Business / Insurance Carriers"], pairRows(carriers), [w.contentW / 2, w.contentW / 2], { dense: true, noPageBreak: true });
   });
-  w.section("Nature of relationship with insurance company(ies) I represent", () => {
-    w.textBlock("In the event that you decide to purchase life insurance products through me, you understand that life insurance products purchased are separate from and not contingent on activities involving Exempt market services. Furthermore, no Insurer holds ownership interest in Shiyun Qiu/2142759 Alberta Ltd., and Shiyun Qiu/2142759 Alberta Ltd. does not hold an ownership interest in any Insurer.", { size: 9.1, lineH: 4.7, gap: 2 });
-    w.textBlock("I will notify you immediately of any other existing or perceived conflict of interest that may relate to any life insurance recommendation that I make if they arise.", { size: 9.1, lineH: 4.7, gap: 2 });
+  disclosureSection("Nature of relationship with insurance company(ies) I represent", () => {
+    small("In the event that you decide to purchase life insurance products through me, you understand that life insurance products purchased are separate from and not contingent on activities involving Exempt market services. Furthermore, no Insurer holds ownership interest in Shiyun Qiu/2142759 Alberta Ltd., and Shiyun Qiu/2142759 Alberta Ltd. does not hold an ownership interest in any Insurer.");
+    small("I will notify you immediately of any other existing or perceived conflict of interest that may relate to any life insurance recommendation that I make if they arise.");
   });
-  w.section("Insurance Compensation", () => {
-    w.textBlock("I am compensated by sales commission on policies I sell and may receive a renewal (or service) commission on policies that remain active. Commissions are paid by the insurance company that provides the product you purchased. For certain products I may receive a referral fee.", { size: 9.1, lineH: 4.7, gap: 2 });
-    w.textBlock("I may be eligible for additional compensation and other benefits, such as bonuses and professional conferences which may be based on my sales reaching a certain level. I may also be entitled to participate in a share purchase plan.", { size: 9.1, lineH: 4.7, gap: 2 });
+  disclosureSection("Insurance Compensation", () => {
+    small("I am compensated by sales commission on policies I sell and may receive a renewal (or service) commission on policies that remain active. Commissions are paid by the insurance company that provides the product you purchased. For certain products I may receive a referral fee.");
+    small("I may be eligible for additional compensation and other benefits, such as bonuses and professional conferences which may be based on my sales reaching a certain level. I may also be entitled to participate in a share purchase plan.");
   });
-  w.section("Potential conflict or conflict of interest", () => w.textBlock("I confirm that I have no conflict of interest. If I become aware of a potential conflict I will tell you.", { size: 9.1, lineH: 4.7, gap: 1.5 }));
-  w.section("More information", () => w.textBlock("If you need more information about my qualifications or my business relationships, please let me know.", { size: 9.1, lineH: 4.7, gap: 1.5 }));
-  if (w.y > 218) {
-    w.finishPage();
-    w.addPage();
-    w.header("Insurance Disclosure and Privacy Consent", "", "");
-  }
-  w.section("Privacy commitment and your client file", () => {
-    w.textBlock("Protecting the privacy of your personal information is important to me and the companies whose products and services I offer, and I'm committed to collecting, using and disclosing your personal information responsibly. The personal information being collected, such as contact information, financial information, medical information, as well as records of meetings and phone calls, general correspondence and any instructions you provide to me, will be maintained by me or at my direction in paper and/or electronic format in a client file. This information will be used to assess your financial situation, offer products and services that may be of interest and benefit to you, and provide ongoing client service.", { size: 8.8, lineH: 4.4, gap: 1.8 });
-    w.textBlock("Your personal information in your client file will be disclosed ONLY to:", { size: 8.8, lineH: 4.4, gap: 1.2 });
-    w.textBlock("- Me or my firm's employees, my MGA - Citistar Financial and employees and persons authorized by me or by my firm;", { size: 8.6, lineH: 4.2, gap: 1.1 });
-    w.textBlock("- Companies whose products and services I offer and their employees and agents, for the purpose of, or relating to, their providing or seeking to provide financial products or services to you and for any other purposes you have authorized;", { size: 8.6, lineH: 4.2, gap: 1.1 });
-    w.textBlock("- Persons or entities to which you have granted access or that are allowed access by law.", { size: 8.6, lineH: 4.2, gap: 1.1 });
-  });
-  w.section("Privacy commitment and your client file - continued", () => {
-    w.textBlock("In accordance with applicable law and by your written request, you have the right to: review the personal information in your client file, request corrections to this information, and to revoke your consent subject to contractual limitations.", { size: 8.8, lineH: 4.4, gap: 1.5 });
-    w.textBlock("If requested by you, additional personal documents such as copies of insurance policies, wills and powers of attorney may be kept in your client file.", { size: 8.8, lineH: 4.4, gap: 1.5 });
-    w.textBlock("If you need more information about my privacy policies and/or those of the companies I represent, please let me know.", { size: 8.8, lineH: 4.4, gap: 1.5 });
-  });
-  w.section("Compliance with Canadian Anti-Spam Law and its Regulations (CASL)", () => {
-    w.textBlock(shiyunCaslConsent, { size: 8.4, lineH: 4.05, gap: 0.8 });
-  }, 9, { compact: true });
   w.finishPage();
   w.addPage();
-  w.header("Insurance Disclosure and Privacy Consent", "", "");
-  w.section("Compliance with Canadian Anti-Spam Law and its Regulations (CASL) - continued", () => {
-    w.textBlock("By signing below, you give your consent to collect and maintain your personal information in your client file and consent to receiving electronic communications.", { size: 8.8, lineH: 4.4, bold: true, gap: 1.5 });
+  w.header("Insurance Disclosure and Privacy Consent", "", "Page 2 of 3");
+  disclosureSection("Potential conflict or conflict of interest", () => small("I confirm that I have no conflict of interest. If I become aware of a potential conflict I will tell you."));
+  disclosureSection("More information", () => small("If you need more information about my qualifications or my business relationships, please let me know."));
+  disclosureSection("Privacy commitment and your client file", () => {
+    body("Protecting the privacy of your personal information is important to me and the companies whose products and services I offer, and I'm committed to collecting, using and disclosing your personal information responsibly. The personal information being collected, such as contact information, financial information, medical information, as well as records of meetings and phone calls, general correspondence and any instructions you provide to me, will be maintained by me or at my direction in paper and/or electronic format in a client file. This information will be used to assess your financial situation, offer products and services that may be of interest and benefit to you, and provide ongoing client service.");
+    body("Your personal information in your client file will be disclosed ONLY to:");
+    small("- Me or my firm's employees, my MGA - Citistar Financial and employees and persons authorized by me or by my firm;");
+    small("- Companies whose products and services I offer and their employees and agents, for the purpose of, or relating to, their providing or seeking to provide financial products or services to you and for any other purposes you have authorized;");
+    small("- Persons or entities to which you have granted access or that are allowed access by law.");
   });
-  w.section("Acknowledgment and Consent", () => {
-    w.textBlock(`I, ${ad.clientName || ad.client1Name || "________________"} (Client Name) acknowledge that I have reviewed this document. I understand any conflicts of interest or potential conflicts of interest outlined in this document. I also consent to a client file being created and maintained for me.`, { size: 8.8, lineH: 4.4, gap: 1.5 });
+  disclosureSection("Privacy commitment and your client file - continued", () => {
+    body("In accordance with applicable law and by your written request, you have the right to: review the personal information in your client file, request corrections to this information, and to revoke your consent subject to contractual limitations.");
+    body("If requested by you, additional personal documents such as copies of insurance policies, wills and powers of attorney may be kept in your client file.");
+    body("If you need more information about my privacy policies and/or those of the companies I represent, please let me know.");
+  });
+  disclosureSection("Compliance with Canadian Anti-Spam Law and its Regulations (CASL)", () => {
+    body(shiyunCaslConsent);
+  });
+  w.finishPage();
+  w.addPage();
+  w.header("Insurance Disclosure and Privacy Consent", "", "Page 3 of 3");
+  disclosureSection("Compliance with Canadian Anti-Spam Law and its Regulations (CASL) - continued", () => {
+    body("By signing below, you give your consent to collect and maintain your personal information in your client file and consent to receiving electronic communications.", { bold: true });
+  });
+  disclosureSection("Acknowledgment and Consent", () => {
+    w.y += 3.5;
+    body(`I, ${ad.clientName || ad.client1Name || "________________"} (Client Name) acknowledge that I have reviewed this document. I understand any conflicts of interest or potential conflicts of interest outlined in this document. I also consent to a client file being created and maintained for me.`);
     w.check(ad.spouseConsent, "I consent to my personal information being maintained in a joint client file with my spouse and being disclosed to my spouse. (Requires signature of spouse, if selected.)");
     w.signature(ad.client1Name || ad.clientName, "Client 1");
     if (ad.client2Name || ad.spouseConsent) w.signature(ad.client2Name, "Client 2");
   });
   w.finishPage();
+  w.preventAutoPageBreak = previousPageBreakSetting;
 };
 const drawAdvisorDisclosureVector = (w, ad, profile) => {
   if (profile.key === "shiyun") return drawShiyunAdvisorDisclosureVector(w, ad, profile);
@@ -4120,6 +4135,7 @@ const drawAdvisorDisclosureVector = (w, ad, profile) => {
   w.section("Companies I represent", () => {
     body("I represent the following insurers to market their products which include life insurance, critical illness insurance, disability insurance, travel insurance, group insurance, and segregated funds through Citistar Financial Services Ltd., a Managing General Agency (MGA):");
     w.table(["Name of Business / Insurance Carriers"], [["CANADA LIFE"], ["MANULIFE"], ["SUN LIFE"], ["EQUITABLE LIFE"], ["iA FINANCIAL"]], null, { compact: true, dense: true });
+    w.y += 4;
     small("For my other occupation, I have a business relationship with 1264670 BC Ltd. and J Yuan Holding Ltd. Under this arrangement, I provide Mutual Funds & Exempt market services through 1264670 BC Ltd. Compensation for these services is commission-based. I have an ownership interest in both 1264670 BC Ltd. and J Yuan Holding Ltd.");
   }, 10, { compact: true });
   w.section("Nature of relationship with insurance company(ies) I represent", () => {
@@ -4148,6 +4164,7 @@ const drawAdvisorDisclosureVector = (w, ad, profile) => {
     body("By signing below, you give your consent to collect and maintain your personal information in your client file and consent to receiving electronic communications.", { bold: true });
   }, 10, { compact: true });
   w.section("Acknowledgment and Consent", () => {
+    w.y += 3.5;
     body(`I, ${ad.clientName || ad.client1Name || "________________"} (Client Name) acknowledge that I have reviewed this document. I understand any conflicts of interest or potential conflicts of interest outlined in this document. I also consent to a client file being created and maintained for me.`);
     w.check(ad.spouseConsent, "I consent to my personal information being maintained in a joint client file with my spouse and being disclosed to my spouse. (Requires signature of spouse, if selected.)");
     w.signature(ad.client1Name || ad.clientName, "Client 1");
@@ -4440,7 +4457,6 @@ const drawLifeInsuranceVector = (w, li) => {
     w.y = y0 + 19.5;
   };
   w.addPage(); w.header("Insurance Needs Analysis", "", "Life Insurance Needs Analysis - Page 1");
-  denseSummaryGrid([["Total Net Worth (CAD)", fmtMoney(totalNetWorth)], ["ACB of Net Worth", fmtMoney(li.acbNetWorth)]]);
   w.section("Client Information", () => w.fields([["Client's Name", li.clientName], ["Occupation", li.occupation], ["Age", li.age], ["Industry", li.industry], ["Earned Income", fmtMoney(li.earnedIncome)], ["Unearned Income", fmtMoney(li.unearnedIncome)], ["Spouse Income", fmtMoney(li.spouseIncome)]], 3, { dense: true }), 10, { compact: true });
   w.section("Canadian Fixed Assets", () => w.table(["Asset", "Market Value", "Mortgage & LOC", "Net Worth"], pdfRows([["Principal Residence", fmtMoney(li.fixedAssets.principalMV), fmtMoney(li.fixedAssets.principalLoan), fmtMoney(num(li.fixedAssets.principalMV)-num(li.fixedAssets.principalLoan))], ...investmentProperties.map(row => [row.name || "Investment Property", fmtMoney(row.marketValue), fmtMoney(row.loan), fmtMoney(num(row.marketValue)-num(row.loan))])]), null, denseTable), 12, { compact: true });
   w.section("Canadian Liquid Assets", () => w.table(["Asset", "Market Value", "Loan", "Net Worth"], pdfRows([["Registered plan (RRSP, TFSA, etc.)", fmtMoney(li.liquidAssets.regMV), fmtMoney(li.liquidAssets.regLoan), fmtMoney(num(li.liquidAssets.regMV)-num(li.liquidAssets.regLoan))], ["Non-registered investment", fmtMoney(li.liquidAssets.nonRegMV), fmtMoney(li.liquidAssets.nonRegLoan), fmtMoney(num(li.liquidAssets.nonRegMV)-num(li.liquidAssets.nonRegLoan))], ["Bank savings", fmtMoney(li.liquidAssets.bankMV), fmtMoney(li.liquidAssets.bankLoan), fmtMoney(num(li.liquidAssets.bankMV)-num(li.liquidAssets.bankLoan))], ...otherLiquidItems.map(row => [row.name || "Other Liquid Asset", fmtMoney(row.marketValue), fmtMoney(row.loan), fmtMoney(num(row.marketValue)-num(row.loan))])]), null, denseTable), 12, { compact: true });
@@ -4502,19 +4518,49 @@ const lifeReasonWhyContext = (data) => {
   const ad = data.advisorDisclosure || {};
   const profile = getAdvisorProfile(data.advisorProfileKey);
   const clientName = li.clientName || fullClientName(ad) || "Client";
+  const clientNames = [clientName, ad.client2Name].filter((name, index, names) => cleanPdfText(name).trim() && names.indexOf(name) === index).join(" and ");
   const productType = coverProductType(data);
   const moneyIfPositive = (value, fallback) => Number(value || 0) > 0 ? fmtMoney(value) : fallback;
   const plainIfText = (value, fallback) => cleanPdfText(value).trim() || fallback;
+  const lifeCoverage = Number(li.newCoverageLife || 0);
+  const ciCoverage = Number(li.newCoverageCI || 0);
   const coverageParts = [
-    Number(li.newCoverageLife || 0) > 0 ? `new life insurance coverage of ${fmtMoney(li.newCoverageLife)}` : "",
-    Number(li.newCoverageCI || 0) > 0 ? `new critical illness coverage of ${fmtMoney(li.newCoverageCI)}` : "",
+    lifeCoverage > 0 ? `new life insurance coverage of ${fmtMoney(li.newCoverageLife)}` : "",
+    ciCoverage > 0 ? `new critical illness coverage of ${fmtMoney(li.newCoverageCI)}` : "",
   ].filter(Boolean);
+  const objectiveParts = [];
+  if (lifeCoverage > 0 || Number(li.lifeIncomeMultiple || 0) > 0) objectiveParts.push("protect your family's lifestyle and provide income replacement");
+  if (Number(li.lifeMortgage || 0) > 0 || Number(li.ciMortgage || 0) > 0) objectiveParts.push("cover outstanding debts and mortgage obligations");
+  if (ciCoverage > 0 || Number(li.ciIncomeMultiple || 0) > 0) objectiveParts.push("provide financial support during a covered critical illness");
+  if (Number(li.businessAssets?.fmv || 0) > 0) objectiveParts.push("support business continuity and estate planning goals");
+  if (!objectiveParts.length) objectiveParts.push("protect your family's lifestyle", "provide income replacement", "cover outstanding debts", "support estate planning goals");
+  const primaryObjectives = objectiveParts.length === 1
+    ? objectiveParts[0]
+    : `${objectiveParts.slice(0, -1).join(", ")}, and ${objectiveParts[objectiveParts.length - 1]}`;
+  const recommendationDescription = lifeCoverage > 0 && ciCoverage > 0
+    ? `a combined life insurance and critical illness insurance solution with life insurance coverage of ${fmtMoney(li.newCoverageLife)} and critical illness coverage of ${fmtMoney(li.newCoverageCI)}`
+    : lifeCoverage > 0
+      ? `a ${productType} policy with a coverage amount of ${fmtMoney(li.newCoverageLife)}`
+      : ciCoverage > 0
+        ? `a ${productType} policy with a coverage amount of ${fmtMoney(li.newCoverageCI)}`
+        : `a ${productType} solution with the coverage amount discussed during our review`;
+  const reviewedOptions = lifeCoverage > 0 && ciCoverage > 0
+    ? "Term Life Insurance, Whole Life Insurance, Universal Life Insurance, Critical Illness Insurance, and other available structures applicable to your needs"
+    : lifeCoverage > 0
+      ? "Term Life Insurance, Whole Life Insurance, Universal Life Insurance, and other available life insurance structures"
+      : ciCoverage > 0
+        ? "Critical Illness Insurance options, including available coverage periods and benefit structures"
+        : "the insurance options available for the needs identified during our review";
   return {
     clientName,
+    clientNames: clientNames || clientName,
     productType,
     advisorName: li.advisorName || profile.advisorName,
     firmName: profile.firmName,
     coverageText: coverageParts.length ? coverageParts.join(" and ") : "the insurance coverage discussed during our review",
+    primaryObjectives,
+    recommendationDescription,
+    reviewedOptions,
     age: plainIfText(li.age, "as documented"),
     occupation: plainIfText(li.occupation, "as documented"),
     industry: plainIfText(li.industry, "as documented"),
@@ -4536,8 +4582,12 @@ const lifeReasonWhySourceSnapshot = (data) => {
   const ctx = lifeReasonWhyContext(data);
   return {
     clientName: ctx.clientName,
+    clientNames: ctx.clientNames,
     productType: ctx.productType,
     coverageText: ctx.coverageText,
+    primaryObjectives: ctx.primaryObjectives,
+    recommendationDescription: ctx.recommendationDescription,
+    reviewedOptions: ctx.reviewedOptions,
     age: ctx.age,
     occupation: ctx.occupation,
     earnedIncome: ctx.earnedIncome,
@@ -4554,34 +4604,30 @@ const lifeReasonWhySourceSnapshot = (data) => {
 const generateLifeReasonWhyBody = (data) => {
   const ctx = lifeReasonWhyContext(data);
   return stripTemplatePlaceholders(`REASON WHY LETTER
-${ctx.productType}
-${fmtLongDate(todayISO())}
+Date: ${fmtLongDate(todayISO())}
 
-Dear ${ctx.clientName},
+Client Name(s): ${ctx.clientNames}
 
-Recommendation
-Based on our recent meeting and the Life Insurance Needs Analysis completed with you, I am recommending ${ctx.coverageText}. This recommendation is intended to address the insurance needs identified during the review, including income replacement, mortgage or debt protection, family protection, estate protection, business continuity, and/or critical illness liquidity, as applicable.
+Dear ${ctx.clientNames},
 
-Client Information Reviewed
-In preparing this recommendation, I reviewed the information you provided, including your age (${ctx.age}), occupation (${ctx.occupation}), industry (${ctx.industry}), earned income (${ctx.earnedIncome}), unearned income (${ctx.unearnedIncome}), spouse income (${ctx.spouseIncome}), existing insurance coverage, assets, liabilities, net worth information, business interests, foreign asset considerations, and premium affordability. If any of this information is incomplete or inaccurate, please advise ${ctx.advisorName} before proceeding so the recommendation can be reviewed and updated.
+Thank you for meeting with me to review your insurance needs and financial objectives. This letter summarizes the information you provided, the discussions we had, and the reasons for the insurance recommendation presented to you.
 
-Needs Analysis and Coverage Rationale
-The recommended coverage was compared against the needs analysis calculations documented in your file. The life insurance review considered income replacement (${ctx.lifeIncomeMultiple}), mortgage or debt protection (${ctx.lifeMortgage}), existing in-force life insurance (${ctx.inForceLife}), and the additional life insurance amount reviewed (${ctx.newCoverageLife}). The critical illness review considered income replacement (${ctx.ciIncomeMultiple}), mortgage or debt protection (${ctx.ciMortgage}), existing in-force critical illness coverage (${ctx.inForceCI}), and the additional critical illness amount reviewed (${ctx.newCoverageCI}). Based on this review, the recommendation is suitable for the needs and priorities documented during our discussion, subject to insurer underwriting and final policy approval.
+Based on the information provided during our discussions, your primary objectives are to ${ctx.primaryObjectives}. We reviewed your current financial situation, including your income, assets, liabilities, existing insurance coverage, family responsibilities, and long-term financial objectives.
 
-Premium Suitability
-The annual premium reviewed for this recommendation is ${ctx.annualPremium}. We discussed the importance of keeping the premium affordable within your current cash flow and financial obligations. You should contact ${ctx.advisorName} if your income, expenses, debt obligations, family circumstances, business situation, or ability to maintain the policy changes.
+After completing a needs analysis, it was determined that additional insurance coverage may be appropriate to help address the financial risks identified and support the goals discussed. We reviewed several available options, including ${ctx.reviewedOptions}, and discussed the advantages, limitations, costs, and suitability of each option.
 
-Product Suitability and Alternatives
-The recommended product type is ${ctx.productType}. We reviewed the purpose of the coverage, the type and amount of insurance, premium structure, underwriting requirements, relevant exclusions and limitations, and the fact that approval is subject to the insurer's underwriting process. Alternatives such as different coverage amounts, different product types, delaying coverage, or relying on existing coverage were considered where relevant.
+Based on the information provided and your stated objectives, I have recommended ${ctx.recommendationDescription}. This recommendation is intended to provide coverage that aligns with your identified needs, affordability considerations, and desired coverage period. The recommended solution was selected because its features and benefits appear suitable for your circumstances and objectives at this time.
 
-Important Disclosures
-Insurance recommendations are based on the information available at the time of the analysis and are not a guarantee of future needs. Policy benefits, premiums, exclusions, limitations, renewability, convertibility, cash values, and other features are governed by the insurer's policy contract and approved illustration, where applicable. You should review the application, illustration, policy contract, product disclosure documents, and any insurer notices carefully before accepting the policy.
+We also discussed that all insurance products are subject to policy terms, conditions, exclusions, and limitations. Any non-guaranteed elements, including dividends, interest rates, investment performance, or projected policy values, may vary over time and should not be relied upon as guarantees of future results. The policy contract will govern all benefits and provisions.
 
-Next Steps
-If you agree with this recommendation, the application will be submitted to the insurer for underwriting. No coverage is in force unless and until the insurer approves the application, all delivery requirements are satisfied, and any required premium is paid. Please keep this Reason Why Letter with your Life Insurance Needs Analysis and policy records.
+This recommendation is based solely on the information you provided during our discussions. Should your financial circumstances, family situation, health status, objectives, or insurance needs change in the future, a review may be necessary to determine whether this recommendation remains suitable.
 
-Advisor and Firm
-This recommendation was prepared by ${ctx.advisorName} through ${ctx.firmName}.
+Please review this letter and contact me if you have any questions regarding the recommendation or the information summarized above.
+
+Sincerely,
+
+${ctx.advisorName}
+${ctx.firmName}
 
 Client Acknowledgement
 I acknowledge that I have reviewed this Reason Why Letter and understand the rationale for the recommendation described above. I confirm that the information used for this recommendation is accurate to the best of my knowledge and that I have had the opportunity to ask questions before proceeding.`);
