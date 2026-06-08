@@ -3853,8 +3853,10 @@ class PdfWriter {
     this.pdf.line(x, startY + 6.2 + lines.length * 4.8 + 1.5, x + width, startY + 6.2 + lines.length * 4.8 + 1.5);
     this.y = startY + 6.2 + lines.length * 4.8 + 7;
   }
-  fields(items, columns = 2) {
-    const gap = 6;
+  fields(items, columns = 2, options = {}) {
+    const dense = !!options.dense;
+    const compact = !!options.compact || dense;
+    const gap = dense ? 4 : 6;
     const width = (this.contentW - gap * (columns - 1)) / columns;
     for (let i = 0; i < items.length; i += columns) {
       const row = items.slice(i, i + columns);
@@ -3862,18 +3864,18 @@ class PdfWriter {
       let maxH = 0;
       row.forEach((it, idx) => {
         const x = this.x + idx * (width + gap);
-        this.setFont(7.8, "bold", PDF_VEC.soft);
+        this.setFont(dense ? 6.3 : 7.8, "bold", PDF_VEC.soft);
         this.pdf.text(cleanPdfText(it[0]), x, y0);
-        const lines = this.textLines(it[1] || " ", width, 9.2);
-        const h = Math.max(12, lines.length * 4.6 + 5.5);
-        this.setFont(9.2, "normal", PDF_VEC.text);
-        this.pdf.text(lines, x, y0 + 5);
+        const lines = this.textLines(it[1] || " ", width, dense ? 7.5 : 9.2);
+        const h = Math.max(dense ? 8.2 : 12, lines.length * (dense ? 3.35 : 4.6) + (dense ? 3.8 : 5.5));
+        this.setFont(dense ? 7.5 : 9.2, "normal", PDF_VEC.text);
+        this.pdf.text(lines, x, y0 + (dense ? 3.8 : 5));
         this.pdf.setDrawColor(PDF_VEC.navy);
         this.pdf.line(x, y0 + h, x + width, y0 + h);
         maxH = Math.max(maxH, h);
       });
-      this.y = y0 + maxH + 6;
-      this.ensure(12);
+      this.y = y0 + maxH + (compact ? 3.2 : 6);
+      this.ensure(compact ? 8 : 12);
     }
   }
   check(checked, label) {
@@ -4431,7 +4433,7 @@ const drawLifeInsuranceVector = (w, li) => {
   };
   w.addPage(); w.header("Insurance Needs Analysis", "", "Life Insurance Needs Analysis - Page 1");
   denseSummaryGrid([["Total Net Worth (CAD)", fmtMoney(totalNetWorth)], ["ACB of Net Worth", fmtMoney(li.acbNetWorth)]]);
-  w.section("Client Information", () => w.fields([["Client's Name", li.clientName], ["Occupation", li.occupation], ["Age", li.age], ["Industry", li.industry], ["Earned Income", fmtMoney(li.earnedIncome)], ["Unearned Income", fmtMoney(li.unearnedIncome)], ["Spouse Income", fmtMoney(li.spouseIncome)]], 2), 14, { compact: true });
+  w.section("Client Information", () => w.fields([["Client's Name", li.clientName], ["Occupation", li.occupation], ["Age", li.age], ["Industry", li.industry], ["Earned Income", fmtMoney(li.earnedIncome)], ["Unearned Income", fmtMoney(li.unearnedIncome)], ["Spouse Income", fmtMoney(li.spouseIncome)]], 3, { dense: true }), 10, { compact: true });
   w.section("Canadian Fixed Assets", () => w.table(["Asset", "Market Value", "Mortgage & LOC", "Net Worth"], pdfRows([["Principal Residence", fmtMoney(li.fixedAssets.principalMV), fmtMoney(li.fixedAssets.principalLoan), fmtMoney(num(li.fixedAssets.principalMV)-num(li.fixedAssets.principalLoan))], ...investmentProperties.map(row => [row.name || "Investment Property", fmtMoney(row.marketValue), fmtMoney(row.loan), fmtMoney(num(row.marketValue)-num(row.loan))])]), null, denseTable), 12, { compact: true });
   w.section("Canadian Liquid Assets", () => w.table(["Asset", "Market Value", "Loan", "Net Worth"], pdfRows([["Registered plan (RRSP, TFSA, etc.)", fmtMoney(li.liquidAssets.regMV), fmtMoney(li.liquidAssets.regLoan), fmtMoney(num(li.liquidAssets.regMV)-num(li.liquidAssets.regLoan))], ["Non-registered investment", fmtMoney(li.liquidAssets.nonRegMV), fmtMoney(li.liquidAssets.nonRegLoan), fmtMoney(num(li.liquidAssets.nonRegMV)-num(li.liquidAssets.nonRegLoan))], ["Bank savings", fmtMoney(li.liquidAssets.bankMV), fmtMoney(li.liquidAssets.bankLoan), fmtMoney(num(li.liquidAssets.bankMV)-num(li.liquidAssets.bankLoan))], ...otherLiquidItems.map(row => [row.name || "Other Liquid Asset", fmtMoney(row.marketValue), fmtMoney(row.loan), fmtMoney(num(row.marketValue)-num(row.loan))])]), null, denseTable), 12, { compact: true });
   w.finishPage();
@@ -4445,9 +4447,9 @@ const drawLifeInsuranceVector = (w, li) => {
   w.finishPage();
 };
 const reasonBlockHeight = (w, block) => {
-  const size = block.type === "heading" ? 10.2 : 9.25;
-  const lineH = block.type === "heading" ? 4.7 : 5.1;
-  return w.textLines(block.text, w.contentW, size).length * lineH + (block.type === "heading" ? 4 : 5.8);
+  const size = block.type === "heading" ? 10 : 9.15;
+  const lineH = block.type === "heading" ? 4.35 : 4.55;
+  return w.textLines(block.text, w.contentW, size).length * lineH + (block.type === "heading" ? 3.0 : 4.1);
 };
 const REASON_BODY_BOTTOM = PDF_VEC.footerY - 12;
 const drawReasonWhyBlocksVector = (w, blocks, subtitle, clientName, { addAcknowledgement = false } = {}) => {
@@ -4466,8 +4468,8 @@ const drawReasonWhyBlocksVector = (w, blocks, subtitle, clientName, { addAcknowl
       w.addPage({ margin: PDF_VEC.reasonMargin });
       w.reasonHeader("Reason Why Letter", subtitle, true);
     }
-    if (block.type === "heading") w.textBlock(block.text, { size: 10.2, lineH: 4.7, bold: true, gap: 3.2 });
-    else w.textBlock(block.text, { size: 9.25, lineH: 5.2, gap: 4.4 });
+    if (block.type === "heading") w.textBlock(block.text, { size: 10, lineH: 4.35, bold: true, gap: 2.4 });
+    else w.textBlock(block.text, { size: 9.15, lineH: 4.55, gap: 3.0 });
   });
   if (w.y + 36 > REASON_BODY_BOTTOM) {
     w.finishPage();
