@@ -1034,7 +1034,7 @@ const AdvisorDisclosureForm = ({ data, update, profile = ADVISOR_PROFILES.jie })
       <section>
         <h4 className="font-semibold text-navy mt-3">Nature of relationship with insurance company(ies) I represent</h4>
         <p className="text-sm text-gray-700">
-          In the event that you decide to purchase life insurance products through me, you understand that life insurance products purchased are separate from and not contingent on activities involving <em><b>{isShiyun ? "Exempt market business." : "Mutual Funds & Exempt market services."}</b></em> Furthermore, no Insurer holds ownership interest in <em><b>{profile.advisorName}/{profile.firmName}</b></em>, and <em><b>{profile.advisorName}/{profile.firmName}</b></em> does not hold an ownership interest in any Insurer.
+          In the event that you decide to purchase life insurance products through me, you understand that life insurance products purchased are separate from and not contingent on activities involving <em><b>{isShiyun ? "Exempt market business." : "Mutual Funds service."}</b></em> Furthermore, no Insurer holds ownership interest in <em><b>{profile.advisorName}/{profile.firmName}</b></em>, and <em><b>{profile.advisorName}/{profile.firmName}</b></em> does not hold an ownership interest in any Insurer.
         </p>
         <p className="text-sm text-gray-700 mt-2">I will notify you immediately of any other existing or perceived conflict of interest that may relate to any life insurance recommendation that I make if they arise.</p>
       </section>
@@ -4136,10 +4136,10 @@ const drawAdvisorDisclosureVector = (w, ad, profile) => {
     body("I represent the following insurers to market their products which include life insurance, critical illness insurance, disability insurance, travel insurance, group insurance, and segregated funds through Citistar Financial Services Ltd., a Managing General Agency (MGA):");
     w.table(["Name of Business / Insurance Carriers"], [["CANADA LIFE"], ["MANULIFE"], ["SUN LIFE"], ["EQUITABLE LIFE"], ["iA FINANCIAL"]], null, { compact: true, dense: true });
     w.y += 4;
-    small("For my other occupation, I have a business relationship with 1264670 BC Ltd. and J Yuan Holding Ltd. Under this arrangement, I provide Mutual Funds & Exempt market services through 1264670 BC Ltd. Compensation for these services is commission-based. I have an ownership interest in both 1264670 BC Ltd. and J Yuan Holding Ltd.");
+    small("For my other occupation, I have a business relationship with 1264670 BC Ltd. and J Yuan Holding Ltd. Under this arrangement, I provide Mutual Funds service through 1264670 BC Ltd. Compensation for these services is commission-based. I have an ownership interest in both 1264670 BC Ltd. and J Yuan Holding Ltd.");
   }, 10, { compact: true });
   w.section("Nature of relationship with insurance company(ies) I represent", () => {
-    body("In the event that you decide to purchase life insurance products through me, you understand that life insurance products purchased are separate from and not contingent on activities involving Mutual Funds & Exempt market services. Furthermore, no Insurer holds ownership interest in Jie Yuan/Triton Wealth Management Corp., and Jie Yuan/Triton Wealth Management Corp. does not hold an ownership interest in any Insurer.");
+    body("In the event that you decide to purchase life insurance products through me, you understand that life insurance products purchased are separate from and not contingent on activities involving Mutual Funds service. Furthermore, no Insurer holds ownership interest in Jie Yuan/Triton Wealth Management Corp., and Jie Yuan/Triton Wealth Management Corp. does not hold an ownership interest in any Insurer.");
     body("I will notify you immediately of any other existing or perceived conflict of interest that may relate to any life insurance recommendation that I make if they arise.");
   }, 10, { compact: true });
   w.finishPage();
