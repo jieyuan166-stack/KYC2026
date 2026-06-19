@@ -1011,7 +1011,7 @@ const AdvisorDisclosureForm = ({ data, update, profile = ADVISOR_PROFILES.jie })
         <p className="text-sm font-semibold underline italic mt-1">
           {isShiyun
             ? "Exempt market business in BC and AB, contracting through Enoch Wealth Inc."
-            : "Mutual Funds & Exempt market business in AB and BC, contracting through Portfolio Strategies Corporation."}
+            : "Mutual Funds business in AB and BC, contracting through Portfolio Strategies Corporation."}
         </p>
       </section>
 
@@ -2953,7 +2953,7 @@ const AdvisorDisclosurePdf = ({ ad }) => (
         <PdfText>I am licensed as a life and health insurance agent in following province:</PdfText>
         <PdfText><b><i>AB, BC and ON</i></b></PdfText>
         <PdfText>I am also licensed/registered in the following fields:</PdfText>
-        <PdfText><b><i>Mutual Funds &amp; Exempt market business in AB and BC, contracting through Portfolio Strategies Corporation.</i></b></PdfText>
+        <PdfText><b><i>Mutual Funds business in AB and BC, contracting through Portfolio Strategies Corporation.</i></b></PdfText>
       </PdfSection>
       <PdfSection title="Companies I represent">
         <PdfText>I represent the following insurers to market their products which include life insurance, critical illness insurance, disability insurance, travel insurance, group insurance, and segregated funds through Citistar Financial Services Ltd., a Managing General Agency (MGA):</PdfText>
@@ -4130,7 +4130,7 @@ const drawAdvisorDisclosureVector = (w, ad, profile) => {
     body("I am licensed as a life and health insurance agent in following province:");
     body("AB, BC and ON", { bold: true });
     body("I am also licensed/registered in the following fields:");
-    body("Mutual Funds & Exempt market business in AB and BC, contracting through Portfolio Strategies Corporation.", { bold: true });
+    body("Mutual Funds business in AB and BC, contracting through Portfolio Strategies Corporation.", { bold: true });
   }, 10, { compact: true });
   w.section("Companies I represent", () => {
     body("I represent the following insurers to market their products which include life insurance, critical illness insurance, disability insurance, travel insurance, group insurance, and segregated funds through Citistar Financial Services Ltd., a Managing General Agency (MGA):");
