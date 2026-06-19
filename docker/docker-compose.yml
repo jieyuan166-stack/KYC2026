@@ -28,24 +28,24 @@ services:
     container_name: triton-kyc-tunnel
     restart: unless-stopped
     user: "0:0"
-    command: tunnel --config /etc/cloudflared/config.yml run TRITON-KYC
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
     depends_on:
       triton-kyc-app:
         condition: service_healthy
     volumes:
-      - /volume1/docker/Triton KYC/docker/cloudflared:/etc/cloudflared:ro
+      - /volume1/docker/kyc-cloudflared:/etc/cloudflared:ro
 
   triton-kyc-tunnel-backup:
     image: cloudflare/cloudflared:2026.5.0
     container_name: triton-kyc-tunnel-backup
     restart: unless-stopped
     user: "0:0"
-    command: tunnel --config /etc/cloudflared/config.yml run TRITON-KYC
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
     depends_on:
       triton-kyc-app:
         condition: service_healthy
     volumes:
-      - /volume1/docker/Triton KYC/docker/cloudflared:/etc/cloudflared:ro
+      - /volume1/docker/kyc-cloudflared:/etc/cloudflared:ro
 
 volumes:
   triton_kyc_node_modules:
