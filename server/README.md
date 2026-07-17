@@ -173,5 +173,8 @@ Returns status + which env vars are set (boolean only, not the secrets themselve
 - Replace `ALLOWED_ORIGINS=*` with your portal's actual origin.
 - Keep `server/data/` on persistent NAS storage and include it in NAS backups.
 - Do not commit `server/data/*.json`; those files can contain client records and the portal password hash.
+- On the NAS, use `sh docker/nas-git.sh status` or `sh docker/nas-git.sh log --oneline -5`
+  when the host does not have a native `git` command. GitHub pushes still require GitHub credentials
+  configured on the NAS; do not hard-code tokens in this repository.
 - The current implementation supports a **single Adobe Sign account** (single `.env`). For multi-advisor setups, add per-advisor credential storage.
 - Refresh tokens last 60 days unless rotated. Re-run the refresh-token recipe in step 2 when needed.
