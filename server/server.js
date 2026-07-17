@@ -63,9 +63,19 @@ const DRAFTS_PATH = path.join(DATA_DIR, "drafts.json");
 const AUTH_PATH = path.join(DATA_DIR, "auth.json");
 const MAX_DRAFTS_PAYLOAD_BYTES = 28_000_000;
 const authSessions = new Map();
+const DATA_UID = Number.parseInt(process.env.KYC_DATA_UID || "", 10);
+const DATA_GID = Number.parseInt(process.env.KYC_DATA_GID || "", 10);
+
+const chownDataPath = (targetPath) => {
+  if (!Number.isInteger(DATA_UID) || DATA_UID < 0) return;
+  try {
+    fs.chownSync(targetPath, DATA_UID, Number.isInteger(DATA_GID) && DATA_GID >= 0 ? DATA_GID : DATA_UID);
+  } catch {}
+};
 
 const ensureDataDir = () => {
   fs.mkdirSync(DATA_DIR, { recursive: true });
+  chownDataPath(DATA_DIR);
   try { fs.chmodSync(DATA_DIR, 0o700); } catch {}
 };
 
@@ -86,6 +96,7 @@ const writeJsonFile = (filePath, value) => {
   const tmp = `${filePath}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(value, null, 2));
   fs.renameSync(tmp, filePath);
+  chownDataPath(filePath);
   try { fs.chmodSync(filePath, 0o600); } catch {}
 };
 
