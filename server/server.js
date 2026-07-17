@@ -64,7 +64,10 @@ const AUTH_PATH = path.join(DATA_DIR, "auth.json");
 const MAX_DRAFTS_PAYLOAD_BYTES = 28_000_000;
 const authSessions = new Map();
 
-const ensureDataDir = () => fs.mkdirSync(DATA_DIR, { recursive: true });
+const ensureDataDir = () => {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  try { fs.chmodSync(DATA_DIR, 0o700); } catch {}
+};
 
 const sha256 = (value) => crypto.createHash("sha256").update(String(value || ""), "utf8").digest("hex");
 
@@ -83,6 +86,7 @@ const writeJsonFile = (filePath, value) => {
   const tmp = `${filePath}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(value, null, 2));
   fs.renameSync(tmp, filePath);
+  try { fs.chmodSync(filePath, 0o600); } catch {}
 };
 
 const getActivePasswordHash = () => {
