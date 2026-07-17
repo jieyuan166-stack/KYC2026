@@ -23,6 +23,7 @@ const express = require("express");
 const cors    = require("cors");
 const fs      = require("fs");
 const path    = require("path");
+const crypto  = require("crypto");
 
 const adobeSign = require("./adobe-sign");
 
@@ -56,6 +57,78 @@ app.use(cors({
 const sendAttempts = new Map();
 const SEND_WINDOW_MS = 15 * 60 * 1000;
 const SEND_LIMIT = 10;
+const DEFAULT_KYC_PASSWORD_HASH = "b4d892dcdd1c8a38a97f6cfcac5bf20075d10947cd9cde9d41e18d2bb2f216d9";
+const DATA_DIR = process.env.KYC_DATA_DIR || path.join(__dirname, "data");
+const DRAFTS_PATH = path.join(DATA_DIR, "drafts.json");
+const AUTH_PATH = path.join(DATA_DIR, "auth.json");
+const MAX_DRAFTS_PAYLOAD_BYTES = 28_000_000;
+const authSessions = new Map();
+
+const ensureDataDir = () => fs.mkdirSync(DATA_DIR, { recursive: true });
+
+const sha256 = (value) => crypto.createHash("sha256").update(String(value || ""), "utf8").digest("hex");
+
+const readJsonFile = (filePath, fallback) => {
+  try {
+    const raw = fs.readFileSync(filePath, "utf8");
+    return JSON.parse(raw);
+  } catch (err) {
+    if (err.code !== "ENOENT") console.error(`[storage] Failed to read ${filePath}:`, err.message);
+    return fallback;
+  }
+};
+
+const writeJsonFile = (filePath, value) => {
+  ensureDataDir();
+  const tmp = `${filePath}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(value, null, 2));
+  fs.renameSync(tmp, filePath);
+};
+
+const getActivePasswordHash = () => {
+  if (process.env.KYC_PASSWORD_HASH) return process.env.KYC_PASSWORD_HASH;
+  const auth = readJsonFile(AUTH_PATH, null);
+  return auth?.passwordHash || DEFAULT_KYC_PASSWORD_HASH;
+};
+
+const createSession = (remember) => {
+  const token = crypto.randomBytes(32).toString("hex");
+  const ttlMs = remember ? 30 * 24 * 60 * 60 * 1000 : 12 * 60 * 60 * 1000;
+  const expiresAt = Date.now() + ttlMs;
+  authSessions.set(token, expiresAt);
+  return { token, expiresAt };
+};
+
+const getBearerToken = (req) => {
+  const header = String(req.get("authorization") || "");
+  if (header.toLowerCase().startsWith("bearer ")) return header.slice(7).trim();
+  return String(req.get("x-kyc-session-token") || "").trim();
+};
+
+const requirePortalSession = (req, res, next) => {
+  const token = getBearerToken(req);
+  const expiresAt = authSessions.get(token);
+  if (!token || !expiresAt || expiresAt <= Date.now()) {
+    if (token) authSessions.delete(token);
+    return res.status(401).json({ ok: false, error: "Unauthorized" });
+  }
+  next();
+};
+
+const readDraftsPayload = () => {
+  const parsed = readJsonFile(DRAFTS_PATH, null);
+  if (Array.isArray(parsed)) return { drafts: parsed, updatedAt: 0 };
+  if (parsed && Array.isArray(parsed.drafts)) return parsed;
+  return { drafts: [], updatedAt: 0 };
+};
+
+const writeDraftsPayload = (drafts) => {
+  writeJsonFile(DRAFTS_PATH, {
+    drafts,
+    updatedAt: Date.now(),
+  });
+};
+
 const limitAdobeSend = (req, res, next) => {
   const origin = req.get("origin");
   if (process.env.NODE_ENV === "production" && !origin) {
@@ -81,6 +154,54 @@ app.get("/api/health", (req, res) => {
     hasRefreshToken: !!process.env.ADOBE_REFRESH_TOKEN,
     apiBase:         process.env.ADOBE_API_BASE || "https://api.na4.adobesign.com",
   });
+});
+
+/* -------------------------------------------------------- */
+app.post("/api/auth/login", (req, res) => {
+  const { password, remember } = req.body || {};
+  if (typeof password !== "string" || password.length > 200) {
+    return res.status(400).json({ ok: false, error: "Invalid password" });
+  }
+  if (sha256(password) !== getActivePasswordHash()) {
+    return res.status(401).json({ ok: false, error: "Password is incorrect" });
+  }
+  res.json({ ok: true, ...createSession(!!remember) });
+});
+
+app.post("/api/auth/change-password", requirePortalSession, (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  if (typeof currentPassword !== "string" || typeof newPassword !== "string") {
+    return res.status(400).json({ ok: false, error: "Missing password" });
+  }
+  if (newPassword.length < 8 || newPassword.length > 200) {
+    return res.status(400).json({ ok: false, error: "New password must be between 8 and 200 characters" });
+  }
+  if (sha256(currentPassword) !== getActivePasswordHash()) {
+    return res.status(401).json({ ok: false, error: "Current password is incorrect" });
+  }
+  writeJsonFile(AUTH_PATH, {
+    passwordHash: sha256(newPassword),
+    updatedAt: Date.now(),
+  });
+  authSessions.clear();
+  res.json({ ok: true, ...createSession(true) });
+});
+
+app.get("/api/drafts", requirePortalSession, (req, res) => {
+  res.json({ ok: true, ...readDraftsPayload() });
+});
+
+app.put("/api/drafts", requirePortalSession, (req, res) => {
+  const drafts = req.body?.drafts;
+  if (!Array.isArray(drafts)) {
+    return res.status(400).json({ ok: false, error: "drafts must be an array" });
+  }
+  const bytes = Buffer.byteLength(JSON.stringify(drafts), "utf8");
+  if (bytes > MAX_DRAFTS_PAYLOAD_BYTES) {
+    return res.status(413).json({ ok: false, error: "Draft payload is too large" });
+  }
+  writeDraftsPayload(drafts);
+  res.json({ ok: true, updatedAt: Date.now() });
 });
 
 /* -------------------------------------------------------- */
@@ -160,6 +281,8 @@ if (fs.existsSync(portalPath)) {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`[triton-compliance] Adobe Sign backend listening on http://localhost:${PORT}`);
+  console.log(`  POST /api/auth/login`);
+  console.log(`  GET  /api/drafts`);
   console.log(`  POST /api/adobe-sign/send`);
   console.log(`  GET  /api/health`);
   if (fs.existsSync(portalPath)) {

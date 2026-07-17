@@ -1,8 +1,12 @@
 # Triton Compliance Portal — Adobe Sign Backend
 
-Small Node + Express service that the Triton Compliance Form Portal calls to push generated PDFs into **Adobe Sign (Acrobat Sign)** and create a signing agreement.
+Small Node + Express service that the Triton Compliance Form Portal calls to:
 
-The frontend (`triton-compliance-portal.html`) stays a single static file. This backend exists only because Adobe Sign's OAuth credentials must never live in the browser.
+- authenticate portal users
+- persist client drafts on the NAS
+- push generated PDFs into **Adobe Sign (Acrobat Sign)** and create a signing agreement
+
+The frontend (`triton-compliance-portal.html`) stays a single static file. This backend exists because Adobe Sign's OAuth credentials and client draft records must never live only in the browser.
 
 ---
 
@@ -92,6 +96,8 @@ npm start
 You should see:
 ```
 [triton-compliance] Adobe Sign backend listening on http://localhost:3000
+  POST /api/auth/login
+  GET  /api/drafts
   POST /api/adobe-sign/send
   GET  /api/health
   GET  /                       (serves triton-compliance-portal.html)
@@ -119,6 +125,16 @@ When you reach the **Review & Generate PDF** step:
 ---
 
 ## 6. REST API reference
+
+### `POST /api/auth/login`
+
+Authenticates the portal password and returns a temporary session token.
+
+### `GET /api/drafts` / `PUT /api/drafts`
+
+Loads and saves the active draft list. Drafts are stored on the NAS in `server/data/drafts.json`.
+The `server/data/*.json` files are intentionally ignored by Git so client records are
+included in NAS backups but are not committed to GitHub in plaintext.
 
 ### `POST /api/adobe-sign/send`
 
@@ -155,5 +171,7 @@ Returns status + which env vars are set (boolean only, not the secrets themselve
 
 - Run behind HTTPS (e.g. nginx / Caddy reverse proxy) before exposing publicly.
 - Replace `ALLOWED_ORIGINS=*` with your portal's actual origin.
+- Keep `server/data/` on persistent NAS storage and include it in NAS backups.
+- Do not commit `server/data/*.json`; those files can contain client records and the portal password hash.
 - The current implementation supports a **single Adobe Sign account** (single `.env`). For multi-advisor setups, add per-advisor credential storage.
 - Refresh tokens last 60 days unless rotated. Re-run the refresh-token recipe in step 2 when needed.

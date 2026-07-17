@@ -374,6 +374,8 @@ const PROVINCES = ["AB","BC","MB","NB","NL","NS","NT","NU","ON","PE","QC","SK","
    STORAGE — multi-draft persistence
    ============================================================ */
 const AUTH_KEY = "triton_kyc_auth_v1";
+const AUTH_SESSION_TOKEN_KEY = "triton_kyc_session_token_v1";
+const AUTH_SESSION_EXPIRES_KEY = "triton_kyc_session_expires_v1";
 const AUTH_CUSTOM_PASSWORD_HASH_KEY = "triton_kyc_custom_password_hash_v1";
 const AUTH_PASSWORD_HASH = "b4d892dcdd1c8a38a97f6cfcac5bf20075d10947cd9cde9d41e18d2bb2f216d9";
 const STORAGE_KEY_LEGACY = "triton_compliance_draft_v1";   // single object (kept for migration)
@@ -446,6 +448,129 @@ const loadDraftsList = () => {
 };
 const saveDraftsList = (drafts) => {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(drafts)); return true; } catch { return false; }
+};
+
+const isServerBackedPortal = () => ["http:", "https:"].includes(window.location.protocol);
+
+const getStoredPortalSession = () => {
+  const read = (storage) => {
+    try {
+      const token = storage.getItem(AUTH_SESSION_TOKEN_KEY);
+      const expiresAt = Number(storage.getItem(AUTH_SESSION_EXPIRES_KEY) || 0);
+      if (!token || !expiresAt || expiresAt <= Date.now()) {
+        storage.removeItem(AUTH_SESSION_TOKEN_KEY);
+        storage.removeItem(AUTH_SESSION_EXPIRES_KEY);
+        return null;
+      }
+      return { token, expiresAt };
+    } catch {
+      return null;
+    }
+  };
+  return read(sessionStorage) || read(localStorage);
+};
+
+const savePortalSession = (session, remember) => {
+  const storage = remember ? localStorage : sessionStorage;
+  storage.setItem(AUTH_SESSION_TOKEN_KEY, session.token);
+  storage.setItem(AUTH_SESSION_EXPIRES_KEY, String(session.expiresAt));
+  if (remember) {
+    sessionStorage.removeItem(AUTH_SESSION_TOKEN_KEY);
+    sessionStorage.removeItem(AUTH_SESSION_EXPIRES_KEY);
+  } else {
+    localStorage.removeItem(AUTH_SESSION_TOKEN_KEY);
+    localStorage.removeItem(AUTH_SESSION_EXPIRES_KEY);
+  }
+};
+
+const clearPortalSession = () => {
+  [sessionStorage, localStorage].forEach(storage => {
+    storage.removeItem(AUTH_KEY);
+    storage.removeItem(AUTH_SESSION_TOKEN_KEY);
+    storage.removeItem(AUTH_SESSION_EXPIRES_KEY);
+  });
+};
+
+const portalAuthHeaders = () => {
+  const session = getStoredPortalSession();
+  return session ? { Authorization: `Bearer ${session.token}` } : {};
+};
+
+const loginToServer = async (password, remember) => {
+  const res = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password, remember }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    const err = new Error(data.error || "Server login failed");
+    err.status = res.status;
+    throw err;
+  }
+  savePortalSession(data, remember);
+  return data;
+};
+
+const changeServerPassword = async (currentPassword, newPassword) => {
+  const res = await fetch("/api/auth/change-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...portalAuthHeaders() },
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    const err = new Error(data.error || "Server password change failed");
+    err.status = res.status;
+    throw err;
+  }
+  savePortalSession(data, true);
+  return data;
+};
+
+const normalizeDraftArray = (drafts) => (
+  Array.isArray(drafts)
+    ? drafts
+        .filter(d => d && d.id && d.formData)
+        .map(d => ({ ...d, formData: normalizeFormData(d.formData), updatedAt: d.updatedAt || Date.now(), createdAt: d.createdAt || d.updatedAt || Date.now() }))
+    : []
+);
+
+const mergeDraftsList = (localDrafts, remoteDrafts) => {
+  const byId = new Map();
+  [...normalizeDraftArray(localDrafts), ...normalizeDraftArray(remoteDrafts)].forEach(draft => {
+    const existing = byId.get(draft.id);
+    if (!existing || (draft.updatedAt || 0) >= (existing.updatedAt || 0)) byId.set(draft.id, draft);
+  });
+  return Array.from(byId.values()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+};
+
+const fetchNasDrafts = async () => {
+  if (!isServerBackedPortal() || !getStoredPortalSession()) return [];
+  const res = await fetch("/api/drafts", { headers: portalAuthHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    const err = new Error(data.error || "Could not load NAS drafts");
+    err.status = res.status;
+    throw err;
+  }
+  return normalizeDraftArray(data.drafts);
+};
+
+const saveNasDrafts = async (drafts) => {
+  if (!isServerBackedPortal() || !getStoredPortalSession()) throw new Error("NAS session unavailable");
+  const res = await fetch("/api/drafts", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...portalAuthHeaders() },
+    body: JSON.stringify({ drafts: normalizeDraftArray(drafts) }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    const err = new Error(data.error || "Could not save NAS drafts");
+    err.status = res.status;
+    throw err;
+  }
+  return true;
 };
 
 const makeId = () => "d_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
@@ -5590,7 +5715,8 @@ const hashText = async (value) => {
 };
 
 const isPortalUnlocked = () => (
-  sessionStorage.getItem(AUTH_KEY) === "ok" || localStorage.getItem(AUTH_KEY) === "ok"
+  (sessionStorage.getItem(AUTH_KEY) === "ok" || localStorage.getItem(AUTH_KEY) === "ok")
+  && (!isServerBackedPortal() || !!getStoredPortalSession())
 );
 
 const getActivePasswordHash = () => localStorage.getItem(AUTH_CUSTOM_PASSWORD_HASH_KEY) || AUTH_PASSWORD_HASH;
@@ -5606,10 +5732,23 @@ const LoginScreen = ({ onLogin }) => {
     setBusy(true);
     setError("");
     try {
-      const hashed = await hashText(password);
-      if (hashed !== getActivePasswordHash()) {
-        setError("Password is incorrect · 密码不正确");
-        return;
+      if (isServerBackedPortal()) {
+        try {
+          await loginToServer(password, remember);
+        } catch (serverErr) {
+          if (serverErr.status === 401) {
+            setError("Password is incorrect · 密码不正确");
+            return;
+          }
+          setError("Server login is unavailable. Please check NAS app status. · NAS 登录服务暂时不可用");
+          return;
+        }
+      } else {
+        const hashed = await hashText(password);
+        if (hashed !== getActivePasswordHash()) {
+          setError("Password is incorrect · 密码不正确");
+          return;
+        }
       }
       const storage = remember ? localStorage : sessionStorage;
       storage.setItem(AUTH_KEY, "ok");
@@ -5695,11 +5834,6 @@ const ChangePasswordModal = ({ open, onClose }) => {
     setMessage("");
     setError("");
     try {
-      const currentHash = await hashText(currentPassword);
-      if (currentHash !== getActivePasswordHash()) {
-        setError("Current password is incorrect · 当前密码不正确");
-        return;
-      }
       if (newPassword.length < 8) {
         setError("New password must be at least 8 characters · 新密码至少 8 位");
         return;
@@ -5708,10 +5842,19 @@ const ChangePasswordModal = ({ open, onClose }) => {
         setError("New passwords do not match · 两次新密码不一致");
         return;
       }
+      if (isServerBackedPortal() && getStoredPortalSession()) {
+        await changeServerPassword(currentPassword, newPassword);
+      } else {
+        const currentHash = await hashText(currentPassword);
+        if (currentHash !== getActivePasswordHash()) {
+          setError("Current password is incorrect · 当前密码不正确");
+          return;
+        }
+      }
       const newHash = await hashText(newPassword);
       localStorage.setItem(AUTH_CUSTOM_PASSWORD_HASH_KEY, newHash);
       sessionStorage.setItem(AUTH_KEY, "ok");
-      setMessage("Password changed on this browser · 密码已在此浏览器更新");
+      setMessage(isServerBackedPortal() ? "Password changed on NAS · 密码已在 NAS 更新" : "Password changed on this browser · 密码已在此浏览器更新");
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
@@ -5828,6 +5971,9 @@ const App = () => {
   const [selectedAdvisorProfileKey, setSelectedAdvisorProfileKey] = useState(() => localStorage.getItem(ADVISOR_PROFILE_KEY) || DEFAULT_ADVISOR_PROFILE_KEY);
   const [profileSelected, setProfileSelected] = useState(() => !!localStorage.getItem(ADVISOR_PROFILE_KEY));
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  const [nasSyncMsg, setNasSyncMsg] = useState("");
+  const nasHydratedRef = useRef(false);
+  const nasSaveTimerRef = useRef(null);
 
   const visibleDrafts = useMemo(
     () => drafts.filter(d => getDraftAdvisorKey(d) === selectedAdvisorProfileKey),
@@ -5847,8 +5993,62 @@ const App = () => {
     setActiveDraftId(blank.id);
   }, [drafts, activeDraftId, selectedAdvisorProfileKey, profileSelected]);
 
-  /* Persist on every change */
-  useEffect(() => { saveDraftsList(drafts); }, [drafts]);
+  /* Load NAS drafts first, then keep browser cache and NAS storage in sync. */
+  useEffect(() => {
+    if (!portalUnlocked) return;
+    let cancelled = false;
+    nasHydratedRef.current = false;
+    (async () => {
+      if (!isServerBackedPortal() || !getStoredPortalSession()) {
+        nasHydratedRef.current = true;
+        return;
+      }
+      try {
+        const remoteDrafts = await fetchNasDrafts();
+        if (cancelled) return;
+        setDrafts(currentDrafts => {
+          const merged = mergeDraftsList(currentDrafts, remoteDrafts);
+          saveDraftsList(merged);
+          return merged.length ? merged : currentDrafts;
+        });
+        setNasSyncMsg("NAS sync active · NAS 已同步");
+      } catch (err) {
+        if (err.status === 401) {
+          clearPortalSession();
+          if (!cancelled) {
+            setPortalUnlocked(false);
+            setNasSyncMsg("");
+          }
+          return;
+        }
+        if (!cancelled) setNasSyncMsg("NAS sync unavailable · 已保存在本机缓存");
+      } finally {
+        nasHydratedRef.current = true;
+        setTimeout(() => !cancelled && setNasSyncMsg(""), 3500);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [portalUnlocked]);
+
+  useEffect(() => {
+    saveDraftsList(drafts);
+    if (!portalUnlocked || !nasHydratedRef.current || !isServerBackedPortal() || !getStoredPortalSession()) return;
+    clearTimeout(nasSaveTimerRef.current);
+    nasSaveTimerRef.current = setTimeout(() => {
+      saveNasDrafts(drafts)
+        .then(() => setNasSyncMsg("Saved to NAS · 已保存到 NAS"))
+        .catch((err) => {
+          if (err.status === 401) {
+            clearPortalSession();
+            setPortalUnlocked(false);
+            return;
+          }
+          setNasSyncMsg("NAS save failed · 已保存在本机缓存");
+        })
+        .finally(() => setTimeout(() => setNasSyncMsg(""), 2500));
+    }, 900);
+    return () => clearTimeout(nasSaveTimerRef.current);
+  }, [drafts, portalUnlocked]);
 
   /* -- derived state for the active draft -- */
   const activeDraft = useMemo(
@@ -6016,9 +6216,14 @@ const App = () => {
     });
   };
 
-  const handleSaveDraft = () => {
+  const handleSaveDraft = async () => {
     saveDraftsList(drafts);    // also auto-persisted, but show feedback
-    setSaveMsg("Draft saved · 已保存");
+    try {
+      await saveNasDrafts(drafts);
+      setSaveMsg("Draft saved to NAS · 已保存到 NAS");
+    } catch {
+      setSaveMsg("Draft saved locally · 已保存在本机缓存");
+    }
     setTimeout(() => setSaveMsg(""), 2500);
   };
 
@@ -6029,6 +6234,7 @@ const App = () => {
     const blank = makeDraft(null, selectedAdvisorProfileKey);
     setDrafts([blank]);
     setActiveDraftId(blank.id);
+    saveNasDrafts([blank]).catch(() => {});
   };
 
   const currentStep = steps[currentStepIdx];
@@ -6060,8 +6266,7 @@ const App = () => {
   };
 
   const handleLogout = () => {
-    sessionStorage.removeItem(AUTH_KEY);
-    localStorage.removeItem(AUTH_KEY);
+    clearPortalSession();
     setPortalUnlocked(false);
   };
 
@@ -6092,7 +6297,7 @@ const App = () => {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3 text-xs">
-            {saveMsg && <span className="text-green-300 serif-italic">{saveMsg}</span>}
+            {(saveMsg || nasSyncMsg) && <span className="text-green-300 serif-italic">{saveMsg || nasSyncMsg}</span>}
             <select
               value={activeProfile.key}
               onChange={e => handleSelectAdvisorProfile(e.target.value)}
