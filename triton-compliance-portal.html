@@ -667,6 +667,85 @@ const getSmartNameTargets = (formData, primaryName, spouseName) => {
   ];
 };
 
+const normalizeSmartFill = (smartFill = {}) => ({
+  ...smartFill,
+  manual: smartFill.manual || {},
+  auto: smartFill.auto || {},
+  lastPrimaryName: smartFill.lastPrimaryName || "",
+  lastSpouseName: smartFill.lastSpouseName || "",
+});
+
+const isSingleLetterNameFragment = (current, value) => {
+  const cur = String(current || "").trim();
+  const next = String(value || "").trim();
+  return cur.length === 1 && next.length > 1 && cur.toLowerCase() !== next.toLowerCase();
+};
+
+const shouldWriteSmartNameTarget = (current, value, previousAuto) => {
+  const cur = String(current || "").trim();
+  const next = String(value || "").trim();
+  const prev = String(previousAuto || "").trim();
+  if (!next) return false;
+  if (!cur) return true;
+  if (cur === next) return false;
+  if (prev && cur === prev) return true;
+  if (prev && cur.toLowerCase() === prev.toLowerCase()) return true;
+  if (next.toLowerCase().startsWith(cur.toLowerCase()) && cur.length < next.length) return true;
+  return isSingleLetterNameFragment(cur, next);
+};
+
+const applySmartNameAutoFillMutable = (formData, { updateHistory = true } = {}) => {
+  if (!formData) return false;
+  formData.advisorDisclosure = formData.advisorDisclosure || {};
+  const ad = formData.advisorDisclosure;
+  const primaryName = fullClientName(ad);
+  const spouseName = (ad.client2Name || "").trim();
+  const smartFill = normalizeSmartFill(formData.smartFill);
+  const manual = smartFill.manual || {};
+  const auto = smartFill.auto || {};
+  const lastPrimaryName = smartFill.lastPrimaryName || "";
+  const lastSpouseName = smartFill.lastSpouseName || "";
+  const targets = getSmartNameTargets(formData, primaryName, spouseName);
+  const previousTargetValues = Object.fromEntries(getSmartNameTargets(
+    { advisorDisclosure: { clientName: lastPrimaryName, client1Name: lastPrimaryName, client2Name: lastSpouseName } },
+    lastPrimaryName,
+    lastSpouseName
+  ));
+
+  let changed = false;
+  const nextAuto = { ...auto };
+
+  targets.forEach(([path, value]) => {
+    if (!value || manual[path]) return;
+    const current = getPath(formData, path) || "";
+    const previousAuto = nextAuto[path] || previousTargetValues[path] || "";
+    if (shouldWriteSmartNameTarget(current, value, previousAuto)) {
+      setPathMutable(formData, path, value);
+      nextAuto[path] = value;
+      changed = true;
+      return;
+    }
+    if (String(current || "").trim() === String(value || "").trim() && nextAuto[path] !== value) {
+      nextAuto[path] = value;
+      changed = true;
+    }
+  });
+
+  const historyChanged = updateHistory && (primaryName !== lastPrimaryName || spouseName !== lastSpouseName);
+  const autoChanged = Object.keys(nextAuto).some(path => nextAuto[path] !== auto[path]);
+  if (changed || historyChanged || autoChanged || !formData.smartFill?.auto) {
+    formData.smartFill = {
+      ...smartFill,
+      manual,
+      auto: nextAuto,
+      lastPrimaryName: updateHistory ? primaryName : lastPrimaryName,
+      lastSpouseName: updateHistory ? spouseName : lastSpouseName,
+    };
+    changed = true;
+  }
+  return changed;
+};
+
 const makeInvestmentPropertyRow = (row = {}) => ({
   id: row.id || makeRowId(),
   name: row.name || "Investment Property",
@@ -727,8 +806,7 @@ function normalizeFormData(formData) {
   const fd = deepClone(formData || initialFormDataRef.current || {});
   fd.advisorProfileKey = fd.advisorProfileKey || DEFAULT_ADVISOR_PROFILE_KEY;
   const profile = getAdvisorProfile(fd.advisorProfileKey);
-  fd.smartFill = fd.smartFill || { manual: {}, lastPrimaryName: "", lastSpouseName: "" };
-  fd.smartFill.manual = fd.smartFill.manual || {};
+  fd.smartFill = normalizeSmartFill(fd.smartFill);
   fd.advisorDisclosure = fd.advisorDisclosure || {};
   fd.segregatedFundInvestment = fd.segregatedFundInvestment || {};
   fd.segregatedFundInvestment.reasonWhy = makeReasonWhy(fd.segregatedFundInvestment.reasonWhy);
@@ -777,6 +855,7 @@ function normalizeFormData(formData) {
     li.liquidAssets.otherItems = ensureRows(li.liquidAssets.otherItems || legacyLiquidRows, makeOtherLiquidRow);
     if (shouldReplaceAdvisorValue(li.advisorName)) li.advisorName = profile.advisorName;
   }
+  applySmartNameAutoFillMutable(fd);
   return fd;
 }
 
@@ -866,7 +945,7 @@ const initialFormData = {
     client2Signature: "",
     client2Date: "",
   },
-  smartFill: { manual: {}, lastPrimaryName: "", lastSpouseName: "" },
+  smartFill: { manual: {}, auto: {}, lastPrimaryName: "", lastSpouseName: "" },
   businessType: "",
   segregatedFundInvestment: {
     leverageLoan: "",
@@ -6102,7 +6181,7 @@ const App = () => {
   const markManualNamePath = useCallback((path) => {
     setDrafts(ds => ds.map(d => {
       if (d.id !== activeDraftId) return d;
-      const smartFill = d.formData.smartFill || { manual: {} };
+      const smartFill = normalizeSmartFill(d.formData.smartFill);
       return {
         ...d,
         formData: {
@@ -6119,40 +6198,8 @@ const App = () => {
 
   useEffect(() => {
     if (!formData) return;
-    const ad = formData.advisorDisclosure || {};
-    const primaryName = fullClientName(ad);
-    const spouseName = (ad.client2Name || "").trim();
-    const smartFill = formData.smartFill || { manual: {} };
-    const manual = smartFill.manual || {};
-    const lastPrimaryName = smartFill.lastPrimaryName || "";
-    const lastSpouseName = smartFill.lastSpouseName || "";
-    const targets = getSmartNameTargets(formData, primaryName, spouseName);
-    const previousTargetValues = Object.fromEntries(getSmartNameTargets(
-      { advisorDisclosure: { clientName: lastPrimaryName, client1Name: lastPrimaryName, client2Name: lastSpouseName } },
-      lastPrimaryName,
-      lastSpouseName
-    ));
-
-    let nextFormData = formData;
-    let changed = false;
-    targets.forEach(([path, value]) => {
-      if (!value || manual[path]) return;
-      const current = getPath(nextFormData, path) || "";
-      const previousAuto = previousTargetValues[path] || "";
-      const looksLikePartialAutoFill = current && value.startsWith(current) && current.length < value.length;
-      if (!current || current === previousAuto || looksLikePartialAutoFill) {
-        nextFormData = setPathImmutable(nextFormData, path, value);
-        changed = true;
-      }
-    });
-
-    if (primaryName !== lastPrimaryName || spouseName !== lastSpouseName) {
-      nextFormData = {
-        ...nextFormData,
-        smartFill: { ...smartFill, manual, lastPrimaryName: primaryName, lastSpouseName: spouseName },
-      };
-      changed = true;
-    }
+    const nextFormData = deepClone(formData);
+    const changed = applySmartNameAutoFillMutable(nextFormData);
     if (changed) updateActiveDraft({ formData: nextFormData });
   }, [
     formData?.advisorDisclosure?.clientName,
