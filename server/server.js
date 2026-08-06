@@ -279,8 +279,14 @@ app.post("/api/adobe-sign/send", limitAdobeSend, async (req, res) => {
 const portalDir = path.resolve(__dirname, "..");
 const portalPath = path.join(portalDir, "triton-compliance-portal.html");
 if (fs.existsSync(portalPath)) {
-  app.get("/", (req, res) => res.sendFile(portalPath));
-  app.get("/triton-compliance-portal.html", (req, res) => res.sendFile(portalPath));
+  const sendPortal = (req, res) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.sendFile(portalPath);
+  };
+  app.get("/", sendPortal);
+  app.get("/triton-compliance-portal.html", sendPortal);
   const publicAssets = new Set([
     "triton-logo.png",
     "Triton Logo 2.png",
