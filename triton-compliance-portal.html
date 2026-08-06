@@ -3098,20 +3098,52 @@ const stripReasonWhyLeadingTitles = (blocks, ctx) => {
     return { ...block, text: kept.join("\n") };
   }).filter(block => hasText(block.text));
 };
+const isReasonDateLine = line => /^(?:date\s*:\s*)?(?:\d{4}[/-]\d{1,2}[/-]\d{1,2}|[A-Za-z]+\s+\d{1,2},\s+\d{4})$/i.test(String(line || "").trim());
+const isReasonSalutation = line => /^(?:dear|to)\s+.+[,;:]?$/i.test(String(line || "").trim());
+const splitLongReasonParagraph = block => {
+  if (block.type !== "paragraph" || block.text.length < 720) return [block];
+  const sentences = block.text.match(/[^.!?]+(?:[.!?]+["']?|$)/g)?.map(sentence => sentence.trim()).filter(Boolean) || [block.text];
+  const groups = [];
+  let current = "";
+  sentences.forEach(sentence => {
+    if (current && `${current} ${sentence}`.length > 640) {
+      groups.push(current);
+      current = sentence;
+    } else {
+      current = current ? `${current} ${sentence}` : sentence;
+    }
+  });
+  if (current) groups.push(current);
+  return groups.map(text => ({ type: "paragraph", text }));
+};
 const reasonWhyBodyBlocks = (body) => {
   const blocks = [];
   String(body || "").replace(/\r\n/g, "\n").split(/\n{2,}/).forEach(part => {
     const lines = part.split(/\n/).map(line => line.trim()).filter(Boolean);
     if (!lines.length) return;
-    const first = lines[0];
-    if (looksLikeLetterHeading(first)) {
-      blocks.push({ type: "heading", text: first });
-      if (lines.length > 1) blocks.push({ type: "paragraph", text: lines.slice(1).join("\n") });
-      return;
-    }
-    blocks.push({ type: "paragraph", text: lines.join("\n") });
+    let paragraphLines = [];
+    const flushParagraph = () => {
+      if (!paragraphLines.length) return;
+      blocks.push({ type: "paragraph", text: paragraphLines.join(" ") });
+      paragraphLines = [];
+    };
+    lines.forEach(line => {
+      if (isReasonSalutation(line)) {
+        flushParagraph();
+        blocks.push({ type: "salutation", text: line });
+      } else if (looksLikeLetterHeading(line)) {
+        flushParagraph();
+        blocks.push({ type: "heading", text: line });
+      } else if (isReasonDateLine(line)) {
+        flushParagraph();
+        blocks.push({ type: "meta", text: line });
+      } else {
+        paragraphLines.push(line);
+      }
+    });
+    flushParagraph();
   });
-  return blocks;
+  return blocks.flatMap(splitLongReasonParagraph);
 };
 const hasClientAcknowledgement = (blocks) => blocks.some(block => /client\s+acknowledg?ement/i.test(block.text || ""));
 const withClientAcknowledgement = (blocks) => hasClientAcknowledgement(blocks)
@@ -3124,12 +3156,7 @@ const looksLikeLetterHeading = (line) => {
   if (/^[A-Z][A-Za-z0-9 &/'().,-]{2,}$/.test(text) && !/[.!?]$/.test(text) && text.split(/\s+/).length <= 8) return true;
   return false;
 };
-const letterBodyBlocks = (body) => String(body || "")
-  .replace(/\r\n/g, "\n")
-  .split(/\n{2,}/)
-  .map(part => part.split(/\n/).map(line => line.trim()).filter(Boolean).join("\n"))
-  .filter(Boolean)
-  .map(text => ({ type: looksLikeLetterHeading(text) ? "heading" : "paragraph", text }));
+const letterBodyBlocks = reasonWhyBodyBlocks;
 const chunkReasonWhyBlocks = (blocks, maxChars = 2600) => {
   const pages = [];
   let page = [];
@@ -3810,6 +3837,8 @@ const PDF_VEC = {
   margin: 15,
   reasonMargin: 16,
   footerY: 270,
+  bodyBottom: 258,
+  reasonBodyBottom: 258,
   navy: NAVY,
   gold: GOLD,
   cream: CREAM,
@@ -3906,7 +3935,7 @@ class PdfWriter {
   }
   ensure(height, opts = {}) {
     if (this.preventAutoPageBreak) return;
-    const bottom = opts.reason ? 264 : 258;
+    const bottom = opts.reason ? PDF_VEC.reasonBodyBottom : PDF_VEC.bodyBottom;
     if (this.y + height <= bottom) return;
     this.finishPage();
     this.addPage({ margin: opts.reason ? PDF_VEC.reasonMargin : PDF_VEC.margin });
@@ -3919,11 +3948,14 @@ class PdfWriter {
     this.pdf.setFontSize(size);
     return this.pdf.splitTextToSize(cleanPdfText(text) || " ", width);
   }
+  drawLines(lines, x, y, lineH, options = {}) {
+    lines.forEach((line, index) => this.pdf.text(line, x, y + index * lineH, options));
+  }
   textBlock(text, { x = this.x, width = this.contentW, size = 10, lineH = 5, color = PDF_VEC.text, bold = false, align = "left", gap = 2 } = {}) {
     const lines = this.textLines(text, width, size);
     this.ensure(lines.length * lineH + gap + 1);
     this.setFont(size, bold ? "bold" : "normal", color);
-    this.pdf.text(lines, x, this.y, { align, maxWidth: width });
+    this.drawLines(lines, x, this.y, lineH, { align });
     this.y += lines.length * lineH + gap;
     return lines.length * lineH + gap;
   }
@@ -4064,22 +4096,24 @@ class PdfWriter {
     const width = (this.contentW - gap * (columns - 1)) / columns;
     for (let i = 0; i < items.length; i += columns) {
       const row = items.slice(i, i + columns);
+      const metrics = row.map(it => {
+        const lines = this.textLines(it[1] || " ", width, dense ? 7.5 : 9.2);
+        const h = Math.max(dense ? 8.2 : 12, lines.length * (dense ? 3.35 : 4.6) + (dense ? 3.8 : 5.5));
+        return { lines, h };
+      });
+      const maxH = Math.max(...metrics.map(metric => metric.h));
+      this.ensure(maxH + (compact ? 3.2 : 6));
       const y0 = this.y;
-      let maxH = 0;
       row.forEach((it, idx) => {
         const x = this.x + idx * (width + gap);
         this.setFont(dense ? 6.3 : 7.8, "bold", PDF_VEC.soft);
         this.pdf.text(cleanPdfText(it[0]), x, y0);
-        const lines = this.textLines(it[1] || " ", width, dense ? 7.5 : 9.2);
-        const h = Math.max(dense ? 8.2 : 12, lines.length * (dense ? 3.35 : 4.6) + (dense ? 3.8 : 5.5));
         this.setFont(dense ? 7.5 : 9.2, "normal", PDF_VEC.text);
-        this.pdf.text(lines, x, y0 + (dense ? 3.8 : 5));
+        this.pdf.text(metrics[idx].lines, x, y0 + (dense ? 3.8 : 5));
         this.pdf.setDrawColor(PDF_VEC.navy);
-        this.pdf.line(x, y0 + h, x + width, y0 + h);
-        maxH = Math.max(maxH, h);
+        this.pdf.line(x, y0 + maxH, x + width, y0 + maxH);
       });
       this.y = y0 + maxH + (compact ? 3.2 : 6);
-      this.ensure(compact ? 8 : 12);
     }
   }
   check(checked, label) {
@@ -4093,12 +4127,12 @@ class PdfWriter {
     this.textBlock(label, { x: this.x + 6, width: this.contentW - 6, size: 8.8, lineH: 4.7, gap: 0.5 });
   }
   longField(label, value, minH = 18) {
-    this.ensure(minH + 11);
+    const lines = this.textLines(value || " ", this.contentW - 7, 9.2);
+    const h = Math.max(minH, lines.length * 5 + 6);
+    this.ensure(h + 9);
     this.setFont(7.8, "bold", PDF_VEC.soft);
     this.pdf.text(cleanPdfText(label), this.x, this.y);
     this.y += 3;
-    const lines = this.textLines(value || " ", this.contentW - 7, 9.2);
-    const h = Math.max(minH, lines.length * 5 + 6);
     this.pdf.setFillColor(PDF_VEC.panel);
     this.pdf.setDrawColor(PDF_VEC.creamDeep);
     this.pdf.rect(this.x, this.y, this.contentW, h, "FD");
@@ -4115,21 +4149,22 @@ class PdfWriter {
     const responseText = options.responseText || PDF_VEC.text;
     const compact = !!options.compact;
     const dense = !!options.dense;
-    const headerSize = dense ? 6.2 : (compact ? 7.1 : 7.8);
-    const rowSize = dense ? 6.5 : (compact ? 7.4 : 8.3);
-    const headerLineH = dense ? 2.7 : (compact ? 3.1 : 3.6);
-    const rowLineH = dense ? 3.0 : (compact ? 3.65 : 4.5);
+    const micro = !!options.micro;
+    const headerSize = micro ? 5.9 : (dense ? 6.2 : (compact ? 7.1 : 7.8));
+    const rowSize = micro ? 6.15 : (dense ? 6.5 : (compact ? 7.4 : 8.3));
+    const headerLineH = micro ? 2.5 : (dense ? 2.7 : (compact ? 3.1 : 3.6));
+    const rowLineH = micro ? 2.72 : (dense ? 3.0 : (compact ? 3.65 : 4.5));
     const drawHeader = () => {
       const headerLines = headers.map((h, i) => this.textLines(h, colW[i] - 3, headerSize));
-      const headerH = Math.max(dense ? 5.6 : (compact ? 6.8 : 8.5), Math.max(...headerLines.map(lines => lines.length * headerLineH + (dense ? 2.4 : (compact ? 3.2 : 4.5)))));
+      const headerH = Math.max(micro ? 5.1 : (dense ? 5.6 : (compact ? 6.8 : 8.5)), Math.max(...headerLines.map(lines => lines.length * headerLineH + (micro ? 2.1 : (dense ? 2.4 : (compact ? 3.2 : 4.5))))));
       this.pdf.setDrawColor(PDF_VEC.creamDeep);
       let x = this.x;
       headers.forEach((h, i) => {
         this.pdf.setFillColor(headerFill);
         this.pdf.setDrawColor(PDF_VEC.creamDeep);
         this.pdf.rect(x, this.y, colW[i], headerH, "FD");
-        this.setFont(dense ? 6.4 : (compact ? 7.2 : 7.9), "bold", headerText);
-        this.pdf.text(headerLines[i], x + 1.5, this.y + (dense ? 3.4 : (compact ? 4.0 : 4.8)));
+        this.setFont(micro ? 5.9 : (dense ? 6.4 : (compact ? 7.2 : 7.9)), "bold", headerText);
+        this.pdf.text(headerLines[i], x + 1.5, this.y + (micro ? 3.05 : (dense ? 3.4 : (compact ? 4.0 : 4.8))));
         x += colW[i];
       });
       this.pdf.setFillColor("#FFFFFF");
@@ -4140,8 +4175,8 @@ class PdfWriter {
     drawHeader();
     rows.forEach((row, ri) => {
       const cellLines = row.map((cell, i) => this.textLines(cleanPdfText(cell) || " ", colW[i] - 3, rowSize));
-      const h = Math.max(dense ? 5.8 : (compact ? 7.2 : 10), Math.max(...cellLines.map(lines => lines.length * rowLineH + (dense ? 2.5 : (compact ? 3.2 : 5.2)))));
-      if (!options.noPageBreak && this.y + h > 258) {
+      const h = Math.max(micro ? 5.15 : (dense ? 5.8 : (compact ? 7.2 : 10)), Math.max(...cellLines.map(lines => lines.length * rowLineH + (micro ? 2.15 : (dense ? 2.5 : (compact ? 3.2 : 5.2))))));
+      if (!options.noPageBreak && this.y + h > PDF_VEC.bodyBottom) {
         this.finishPage();
         this.addPage();
         drawHeader();
@@ -4153,14 +4188,14 @@ class PdfWriter {
         this.pdf.setDrawColor(PDF_VEC.creamDeep);
         this.pdf.rect(x, this.y, colW[i], h, "FD");
         this.setFont(rowSize, "normal", isResponseCell ? responseText : PDF_VEC.text);
-        this.pdf.text(cellLines[i], x + 1.5, this.y + (dense ? 3.8 : (compact ? 4.5 : 5.4)));
+        this.pdf.text(cellLines[i], x + 1.5, this.y + (micro ? 3.35 : (dense ? 3.8 : (compact ? 4.5 : 5.4))));
         x += colW[i];
       });
       this.pdf.setFillColor("#FFFFFF");
       this.pdf.setTextColor(PDF_VEC.text);
       this.y += h;
     });
-    this.y += dense ? 1.8 : (compact ? 3.2 : 6);
+    this.y += micro ? 1.2 : (dense ? 1.8 : (compact ? 3.2 : 6));
   }
   signature(name, role = "Client", width = 62) {
     const sigW = width;
@@ -4184,9 +4219,9 @@ class PdfWriter {
     this.y += 34;
   }
   initials(label = "Client Initials") {
-    const boxW = 20;
-    const boxH = 11;
-    this.ensure(24);
+    const boxW = 18;
+    const boxH = 9.5;
+    this.ensure(21);
     const x = PDF_MM.w - this.margin - boxW;
     const labelY = this.y + 4;
     this.setFont(7.8, "bold", PDF_VEC.navy);
@@ -4196,7 +4231,7 @@ class PdfWriter {
     this.pdf.rect(x, labelY + 3, boxW, boxH, "FD");
     this.pdf.setFillColor("#FFFFFF");
     this.pdf.setTextColor(PDF_VEC.text);
-    this.y = labelY + boxH + 9;
+    this.y = labelY + boxH + 7;
   }
   summary(label, value, options = {}) {
     const compact = !!options.compact;
@@ -4213,17 +4248,18 @@ class PdfWriter {
   }
   optionLine(option, selected, width = this.contentW - 7, options = {}) {
     const compact = !!options.compact;
-    const size = compact ? 6.8 : 8.1;
-    const lineH = compact ? 3.0 : 3.9;
+    const tight = !!options.tight;
+    const size = tight ? 6.35 : (compact ? 6.8 : 8.1);
+    const lineH = tight ? 2.72 : (compact ? 3.0 : 3.9);
     const text = `${option.l}${option.p !== undefined ? ` (${option.p} pts)` : ""}`;
     const lines = this.textLines(text, width - 9, size);
-    const h = Math.max(compact ? 4.4 : 5.6, lines.length * lineH + (compact ? 0.7 : 1.3));
+    const h = Math.max(tight ? 3.95 : (compact ? 4.4 : 5.6), lines.length * lineH + (tight ? 0.55 : (compact ? 0.7 : 1.3)));
     this.ensure(h + 1);
     this.pdf.setDrawColor(PDF_VEC.navy);
-    this.pdf.rect(this.x + 2, this.y - (compact ? 2.5 : 3), compact ? 3 : 3.4, compact ? 3 : 3.4);
+    this.pdf.rect(this.x + 2, this.y - (tight ? 2.25 : (compact ? 2.5 : 3)), tight ? 2.75 : (compact ? 3 : 3.4), tight ? 2.75 : (compact ? 3 : 3.4));
     if (selected) {
-      this.setFont(compact ? 6.2 : 7, "bold", PDF_VEC.navy);
-      this.pdf.text("X", this.x + 2.65, this.y - (compact ? 0.25 : 0.2));
+      this.setFont(tight ? 5.8 : (compact ? 6.2 : 7), "bold", PDF_VEC.navy);
+      this.pdf.text("X", this.x + 2.6, this.y - (tight ? 0.15 : (compact ? 0.25 : 0.2)));
     }
     this.setFont(size, selected ? "bold" : "normal", PDF_VEC.text);
     this.pdf.text(lines, this.x + 8, this.y);
@@ -4231,19 +4267,32 @@ class PdfWriter {
   }
   questionOptionBlock(question, selectedValue, options = {}) {
     const compact = !!options.compact;
-    const qSize = compact ? 7.25 : 8.7;
-    const qLineH = compact ? 3.2 : 4.2;
+    const tight = !!options.tight;
+    const qSize = tight ? 6.8 : (compact ? 7.25 : 8.7);
+    const qLineH = tight ? 2.95 : (compact ? 3.2 : 4.2);
     const qLines = this.textLines(question.label, this.contentW, qSize);
     const firstOptionsH = question.options.slice(0, 2).reduce((s, option) => {
-      const lines = this.textLines(`${option.l}${option.p !== undefined ? ` (${option.p} pts)` : ""}`, this.contentW - 16, compact ? 6.8 : 8.1);
-      return s + Math.max(compact ? 4.4 : 5.6, lines.length * (compact ? 3.0 : 3.9) + (compact ? 0.7 : 1.3));
+      const lines = this.textLines(`${option.l}${option.p !== undefined ? ` (${option.p} pts)` : ""}`, this.contentW - 16, tight ? 6.35 : (compact ? 6.8 : 8.1));
+      return s + Math.max(tight ? 3.95 : (compact ? 4.4 : 5.6), lines.length * (tight ? 2.72 : (compact ? 3.0 : 3.9)) + (tight ? 0.55 : (compact ? 0.7 : 1.3)));
     }, 0);
-    this.ensure(qLines.length * qLineH + firstOptionsH + (compact ? 4 : 7));
+    this.ensure(qLines.length * qLineH + firstOptionsH + (tight ? 3.2 : (compact ? 4 : 7)));
     this.setFont(qSize, "bold", PDF_VEC.navy);
     this.pdf.text(qLines, this.x, this.y);
-    this.y += qLines.length * qLineH + (compact ? 0.9 : 1.5);
-    question.options.forEach(option => this.optionLine(option, choiceMatches(option.l, selectedValue), this.contentW - 7, { compact }));
-    this.y += compact ? 1.1 : 2.4;
+    this.y += qLines.length * qLineH + (tight ? 0.65 : (compact ? 0.9 : 1.5));
+    question.options.forEach(option => this.optionLine(option, choiceMatches(option.l, selectedValue), this.contentW - 7, { compact, tight }));
+    this.y += tight ? 0.75 : (compact ? 1.1 : 2.4);
+  }
+  questionOptionBlockHeight(question, options = {}) {
+    const compact = !!options.compact;
+    const tight = !!options.tight;
+    const qSize = tight ? 6.8 : (compact ? 7.25 : 8.7);
+    const qLineH = tight ? 2.95 : (compact ? 3.2 : 4.2);
+    const qLines = this.textLines(question.label, this.contentW, qSize);
+    const optionHeight = question.options.reduce((sum, option) => {
+      const lines = this.textLines(`${option.l}${option.p !== undefined ? ` (${option.p} pts)` : ""}`, this.contentW - 16, tight ? 6.35 : (compact ? 6.8 : 8.1));
+      return sum + Math.max(tight ? 3.95 : (compact ? 4.4 : 5.6), lines.length * (tight ? 2.72 : (compact ? 3.0 : 3.9)) + (tight ? 0.55 : (compact ? 0.7 : 1.3)));
+    }, 0);
+    return qLines.length * qLineH + optionHeight + (tight ? 1.4 : (compact ? 2 : 3.9));
   }
 }
 const pdfRows = (rows) => rows.map(row => row.map(cell => cleanPdfText(cell)));
@@ -4256,8 +4305,8 @@ const drawShiyunAdvisorDisclosureVector = (w, ad, profile) => {
   const carriers = ["CANADA LIFE", "MANULIFE", "SUN LIFE", "EQUITABLE LIFE", "iA FINANCIAL", "DESJARDINS", "BMO INSURANCE", "FORESTERS", "CPP", "TUGO"];
   const shiyunCaslConsent = "I consent to receiving electronic communications from Shiyun Qiu about my insurance and/or investment needs and coverage and information about products and services that might benefit me. I understand that I may withdraw my consent at any time.";
   const previousPageBreakSetting = w.preventAutoPageBreak;
-  const body = (text, opts = {}) => w.textBlock(text, { size: 7.9, lineH: 3.72, gap: 0.65, ...opts });
-  const small = (text, opts = {}) => w.textBlock(text, { size: 7.55, lineH: 3.48, gap: 0.5, ...opts });
+  const body = (text, opts = {}) => w.textBlock(text, { size: 8.2, lineH: 3.95, gap: 1.15, ...opts });
+  const small = (text, opts = {}) => w.textBlock(text, { size: 7.85, lineH: 3.7, gap: 0.9, ...opts });
   const disclosureSection = (title, fn) => {
     w.pdf.setFillColor(PDF_VEC.navy);
     w.pdf.rect(w.x, w.y - 1.2, w.contentW, 6.1, "F");
@@ -4265,9 +4314,9 @@ const drawShiyunAdvisorDisclosureVector = (w, ad, profile) => {
     w.pdf.rect(w.x, w.y - 1.2, 0.8, 6.1, "F");
     w.setFont(8.1, "bold", "#FFFFFF");
     w.pdf.text(cleanPdfText(title), w.x + 4, w.y + 2.9);
-    w.y += 8.5;
+    w.y += 9.1;
     fn();
-    w.y += 1.5;
+    w.y += 2.1;
   };
   w.preventAutoPageBreak = true;
   w.addPage(); w.header("Insurance Disclosure and Privacy Consent", `${profile.advisorName}, Independent Advisor, ${profile.firmName}`, "Page 1 of 3");
@@ -4285,13 +4334,13 @@ const drawShiyunAdvisorDisclosureVector = (w, ad, profile) => {
     small("In the event that you decide to purchase life insurance products through me, you understand that life insurance products purchased are separate from and not contingent on activities involving Exempt market services. Furthermore, no Insurer holds ownership interest in Shiyun Qiu/2142759 Alberta Ltd., and Shiyun Qiu/2142759 Alberta Ltd. does not hold an ownership interest in any Insurer.");
     small("I will notify you immediately of any other existing or perceived conflict of interest that may relate to any life insurance recommendation that I make if they arise.");
   });
+  w.finishPage();
+  w.addPage();
+  w.header("Insurance Disclosure and Privacy Consent", "", "Page 2 of 3");
   disclosureSection("Insurance Compensation", () => {
     small("I am compensated by sales commission on policies I sell and may receive a renewal (or service) commission on policies that remain active. Commissions are paid by the insurance company that provides the product you purchased. For certain products I may receive a referral fee.");
     small("I may be eligible for additional compensation and other benefits, such as bonuses and professional conferences which may be based on my sales reaching a certain level. I may also be entitled to participate in a share purchase plan.");
   });
-  w.finishPage();
-  w.addPage();
-  w.header("Insurance Disclosure and Privacy Consent", "", "Page 2 of 3");
   disclosureSection("Potential conflict or conflict of interest", () => small("I confirm that I have no conflict of interest. If I become aware of a potential conflict I will tell you."));
   disclosureSection("More information", () => small("If you need more information about my qualifications or my business relationships, please let me know."));
   disclosureSection("Privacy commitment and your client file", () => {
@@ -4301,6 +4350,9 @@ const drawShiyunAdvisorDisclosureVector = (w, ad, profile) => {
     small("- Companies whose products and services I offer and their employees and agents, for the purpose of, or relating to, their providing or seeking to provide financial products or services to you and for any other purposes you have authorized;");
     small("- Persons or entities to which you have granted access or that are allowed access by law.");
   });
+  w.finishPage();
+  w.addPage();
+  w.header("Insurance Disclosure and Privacy Consent", "", "Page 3 of 3");
   disclosureSection("Privacy commitment and your client file - continued", () => {
     body("In accordance with applicable law and by your written request, you have the right to: review the personal information in your client file, request corrections to this information, and to revoke your consent subject to contractual limitations.");
     body("If requested by you, additional personal documents such as copies of insurance policies, wills and powers of attorney may be kept in your client file.");
@@ -4308,11 +4360,6 @@ const drawShiyunAdvisorDisclosureVector = (w, ad, profile) => {
   });
   disclosureSection("Compliance with Canadian Anti-Spam Law and its Regulations (CASL)", () => {
     body(shiyunCaslConsent);
-  });
-  w.finishPage();
-  w.addPage();
-  w.header("Insurance Disclosure and Privacy Consent", "", "Page 3 of 3");
-  disclosureSection("Compliance with Canadian Anti-Spam Law and its Regulations (CASL) - continued", () => {
     body("By signing below, you give your consent to collect and maintain your personal information in your client file and consent to receiving electronic communications.", { bold: true });
   });
   disclosureSection("Acknowledgment and Consent", () => {
@@ -4342,12 +4389,12 @@ const drawAdvisorDisclosureVector = (w, ad, profile) => {
     w.y += 4;
     small("For my other occupation, I have a business relationship with 1264670 BC Ltd. and J Yuan Holding Ltd. Under this arrangement, I provide Mutual Funds service through 1264670 BC Ltd. Compensation for these services is commission-based. I have an ownership interest in both 1264670 BC Ltd. and J Yuan Holding Ltd.");
   }, 10, { compact: true });
+  w.finishPage();
+  w.addPage(); w.header("Insurance Disclosure and Privacy Consent", "", "Page 2 of 3");
   w.section("Nature of relationship with insurance company(ies) I represent", () => {
     body("In the event that you decide to purchase life insurance products through me, you understand that life insurance products purchased are separate from and not contingent on activities involving Mutual Funds service. Furthermore, no Insurer holds ownership interest in Jie Yuan/Triton Wealth Management Corp., and Jie Yuan/Triton Wealth Management Corp. does not hold an ownership interest in any Insurer.");
     body("I will notify you immediately of any other existing or perceived conflict of interest that may relate to any life insurance recommendation that I make if they arise.");
   }, 10, { compact: true });
-  w.finishPage();
-  w.addPage(); w.header("Insurance Disclosure and Privacy Consent", "", "Page 2 of 3");
   w.section("Insurance Compensation", () => {
     body("I am compensated by sales commission on policies I sell and may receive a renewal (or service) commission on policies that remain active. Commissions are paid by the insurance company that provides the product you purchased. For certain products I may receive a referral fee.");
     body("I may be eligible for additional compensation and other benefits, such as bonuses and professional conferences which may be based on my sales reaching a certain level. I may also be entitled to participate in a share purchase plan.");
@@ -4377,74 +4424,287 @@ const drawAdvisorDisclosureVector = (w, ad, profile) => {
   w.finishPage();
 };
 const drawLeverageVector = (w, lc) => {
-  const denseTable = { dense: true };
-  w.addPage(); w.header("CITISTAR FINANCIAL SERVICES LTD.", "Segregated Funds Using Leverage Loan - Know Your Client (KYC)", "Leverage KYC Page 1");
-  w.section("Client Information", () => w.fields([["Last Name of Client", lc.clientLast], ["First Name of Client", lc.clientFirst], ["Last Name of Joint Client", lc.jointLast], ["First Name of Joint Client", lc.jointFirst], ["Leveraging", lc.leveragingType]], 2), 14, { compact: true });
-  w.section("Know-Your-Client (KYC)", () => w.fields([["Client Age", lc.clientAge], ["Joint Applicant Age", lc.jointAge], ["Client Knowledge", lc.clientKnowledge], ["Joint Applicant Knowledge", lc.jointKnowledge], ["Investment Objectives", lc.investmentObjectives], ["Time Horizon", lc.timeHorizon], ["Risk Tolerance - High %", lc.riskHigh], ["Medium %", lc.riskMedium], ["Low %", lc.riskLow]], 2), 14, { compact: true });
+  const denseTable = { dense: true, noPageBreak: true };
+  const income = lc.income || {};
+  const incomeMonthly = lc.incomeMonthly || {};
+  const netWorth = lc.netWorth || {};
+  const incomeOtherRows = ensureRows(income.otherItems, makeIncomeOtherRow).filter(row => hasText(row.annual) || hasText(row.monthly) || (hasText(row.label) && row.label.trim().toLowerCase() !== "other"));
+  const netOtherRows = ensureRows(netWorth.otherItems, makeNetWorthOtherRow).filter(row => hasText(row.client) || hasText(row.joint) || (hasText(row.label) && row.label.trim().toLowerCase() !== "other"));
+  const debtRows = (lc.debt || []).filter(row => hasText(row.lender) || hasText(row.balance) || hasText(row.monthly));
+  const compactSection = (title, fn) => {
+    w.pdf.setFillColor(PDF_VEC.navy);
+    w.pdf.rect(w.x, w.y - 1.2, w.contentW, 6.1, "F");
+    w.pdf.setFillColor(PDF_VEC.gold);
+    w.pdf.rect(w.x, w.y - 1.2, 0.8, 6.1, "F");
+    w.setFont(8.45, "bold", "#FFFFFF");
+    w.pdf.text(cleanPdfText(title), w.x + 4, w.y + 2.9);
+    w.y += 7.5;
+    fn();
+    w.y += 1.1;
+  };
+  const compactNotes = () => {
+    const lines = w.textLines(lc.notes || " ", w.contentW - 6, 7.8);
+    const height = Math.max(10.5, lines.length * 3.35 + 5);
+    w.ensure(height + 2);
+    w.pdf.setFillColor("#FFFFFF");
+    w.pdf.setDrawColor(PDF_VEC.creamDeep);
+    w.pdf.rect(w.x, w.y, w.contentW, height, "FD");
+    w.setFont(7.8, "normal", PDF_VEC.text);
+    w.drawLines(lines, w.x + 2.6, w.y + 3.8, 3.35);
+    w.y += height + 1.5;
+  };
+  const disclosureRows = [
+    ["Risk of Borrowing to Invest", "Using borrowed money to finance the purchase of securities involves greater risk than a purchase using cash resources only. Your responsibility to repay the loan and pay interest remains the same even if the value of the securities purchased declines."],
+    ["Is it Right for You?", "Borrowing money to invest is risky. You should only consider it if you are comfortable with taking risk, taking on debt to buy investments that may go up or down in value, investing for the long-term, and you have a stable income."],
+    ["You Can End Up Losing Money", "If the investments go down in value and you have borrowed money, your losses would be larger than had you invested using your own money. Whether your investments make money or not, you will still have to pay back the loan plus interest."],
+    ["Tax Considerations", "You should not borrow to invest just to receive a tax deduction. Interest costs are not always tax deductible. Consult a tax professional to determine whether your interest costs will be deductible before borrowing to invest."],
+  ];
+  const drawDisclosureRow = ([heading, text]) => {
+    const boxW = 18;
+    const boxH = 9.5;
+    const textW = w.contentW - 23;
+    const lines = w.textLines(text, textW, 7.4);
+    const rowH = Math.max(13.8, 5 + lines.length * 3.2);
+    w.ensure(rowH + 1);
+    const y0 = w.y;
+    w.setFont(7.9, "bold", PDF_VEC.navy);
+    w.pdf.text(heading, w.x, y0 + 2.8);
+    w.setFont(7.4, "normal", PDF_VEC.text);
+    w.drawLines(lines, w.x, y0 + 6, 3.2);
+    w.setFont(7.15, "bold", PDF_VEC.navy);
+    w.pdf.text("Client Initials", w.x + w.contentW - boxW, y0 + 2.8);
+    w.pdf.setFillColor("#FFFFFF");
+    w.pdf.setDrawColor(PDF_VEC.gold);
+    w.pdf.rect(w.x + w.contentW - boxW, y0 + 4.6, boxW, boxH, "FD");
+    w.pdf.setDrawColor(PDF_VEC.line);
+    w.pdf.line(w.x, y0 + rowH, w.x + w.contentW, y0 + rowH);
+    w.y = y0 + rowH + 1.1;
+  };
+  const drawCriteriaGrid = () => {
+    const criteria = [
+      "Risk tolerance is low. Where risk tolerance is 100% low, leveraging is not permitted.",
+      "Person's age is 60 years or greater, or the time horizon is less than 5 years.",
+      "Investment loan exceeds 30% of net worth, or total debt payments exceed 35% of gross income.",
+      "Investment knowledge is Poor/None, the client relies on spousal resources, or cannot withstand financial loss.",
+    ];
+    w.textBlock("The presence of ANY of the following KYC criteria should result in a determination that leveraging may NOT be suitable:", { size: 7.15, lineH: 3.05, gap: 0.7 });
+    const gap = 4;
+    const colW = (w.contentW - gap) / 2;
+    for (let i = 0; i < criteria.length; i += 2) {
+      const row = criteria.slice(i, i + 2);
+      const lines = row.map(text => w.textLines(`- ${text}`, colW - 4, 6.85));
+      const rowH = Math.max(...lines.map(item => item.length * 2.95 + 3.8));
+      row.forEach((text, idx) => {
+        const x = w.x + idx * (colW + gap);
+        w.pdf.setFillColor(PDF_VEC.panel);
+        w.pdf.setDrawColor(PDF_VEC.creamDeep);
+        w.pdf.rect(x, w.y, colW, rowH, "FD");
+        w.setFont(6.85, "normal", PDF_VEC.text);
+        w.drawLines(lines[idx], x + 2, w.y + 3, 2.95);
+      });
+      w.y += rowH + 1.2;
+    }
+  };
+  const drawCompactSignatureGrid = (signers) => {
+    const gap = 6;
+    const colW = (w.contentW - gap) / 2;
+    const sigH = 10.5;
+    const dateW = 56;
+    const dateH = 9.5;
+    const rowH = 34.5;
+    for (let i = 0; i < signers.length; i += 2) {
+      const row = signers.slice(i, i + 2);
+      const y0 = w.y;
+      row.forEach(([name, role], idx) => {
+        const x = w.x + idx * (colW + gap);
+        w.setFont(9, "bold", PDF_VEC.navy);
+        w.pdf.text(cleanPdfText(name || role), x, y0 + 3);
+        w.setFont(7.2, "bold", PDF_VEC.navy);
+        w.pdf.text(`${role} Signature`, x, y0 + 7.4);
+        w.pdf.setFillColor("#FFFFFF");
+        w.pdf.setDrawColor(PDF_VEC.gold);
+        w.pdf.rect(x, y0 + 9, colW, sigH, "FD");
+        w.setFont(7.2, "bold", PDF_VEC.navy);
+        w.pdf.text("Date", x, y0 + 23.3);
+        w.pdf.setFillColor("#FFFFFF");
+        w.pdf.setDrawColor(PDF_VEC.gold);
+        w.pdf.rect(x, y0 + 24.7, dateW, dateH, "FD");
+      });
+      w.y = y0 + rowH + 1;
+    }
+  };
+
+  w.addPage();
+  w.header("CITISTAR FINANCIAL SERVICES LTD.", "Segregated Funds Using Leverage Loan - Know Your Client (KYC)", "Leverage KYC Page 1");
+  w.section("Client Information", () => w.fields([["Last Name of Client", lc.clientLast], ["First Name of Client", lc.clientFirst], ["Last Name of Joint Client", lc.jointLast], ["First Name of Joint Client", lc.jointFirst], ["Leveraging", lc.leveragingType]], 2, { dense: true }), 10, { compact: true });
+  w.section("Know-Your-Client (KYC)", () => w.fields([["Client Age", lc.clientAge], ["Joint Applicant Age", lc.jointAge], ["Client Knowledge", lc.clientKnowledge], ["Joint Applicant Knowledge", lc.jointKnowledge], ["Investment Objectives", lc.investmentObjectives], ["Time Horizon", lc.timeHorizon], ["Risk Tolerance - High %", lc.riskHigh], ["Medium %", lc.riskMedium], ["Low %", lc.riskLow]], 2, { dense: true }), 10, { compact: true });
   w.section("Annual Income From All Sources", () => w.table(["Income Type", "Annual ($)", "Monthly ($)"], pdfRows([
-    ["Employment Client", fmtMoney(lc.income.empClient), fmtMoney(lc.incomeMonthly.empClient)],
-    ["Employment Joint Applicant", fmtMoney(lc.income.empJoint), fmtMoney(lc.incomeMonthly.empJoint)],
-    ["Investment", fmtMoney(lc.income.investment), fmtMoney(lc.incomeMonthly.investment)],
-    ["Rental", fmtMoney(lc.income.rental), fmtMoney(lc.incomeMonthly.rental)],
-    ...ensureRows(lc.income.otherItems, makeIncomeOtherRow).map(row => [row.label || "Other", fmtMoney(row.annual), fmtMoney(row.monthly)]),
-    ["Total", fmtMoney(lc.income.totalAnnual), fmtMoney(lc.income.totalMonthly)],
-  ]), null, denseTable), 12, { compact: true });
+    ["Employment Client", fmtMoney(income.empClient), fmtMoney(incomeMonthly.empClient)],
+    ["Employment Joint Applicant", fmtMoney(income.empJoint), fmtMoney(incomeMonthly.empJoint)],
+    ["Investment", fmtMoney(income.investment), fmtMoney(incomeMonthly.investment)],
+    ["Rental", fmtMoney(income.rental), fmtMoney(incomeMonthly.rental)],
+    ...incomeOtherRows.map(row => [row.label || "Other", fmtMoney(row.annual), fmtMoney(row.monthly)]),
+    ["Total", fmtMoney(income.totalAnnual), fmtMoney(income.totalMonthly)],
+  ]), null, denseTable), 10, { compact: true });
   w.finishPage();
-  w.addPage(); w.header("Leverage KYC - Net Worth & Debt", "", "Leverage KYC Page 2");
-  w.section("Total Net Worth ($) - New loan + Existing debts should not exceed 30%", () => w.table(["Asset Type", "Client ($)", "Joint Applicant ($)"], pdfRows([
-    ["Registered Investments (less loans against securities)", fmtMoney(lc.netWorth.regClient), fmtMoney(lc.netWorth.regJoint)],
-    ["Non-Registered Investments (cash & securities less loans)", fmtMoney(lc.netWorth.nonRegClient), fmtMoney(lc.netWorth.nonRegJoint)],
-    ["Fixed Assets", fmtMoney(lc.netWorth.fixedClient), fmtMoney(lc.netWorth.fixedJoint)],
-    ...ensureRows(lc.netWorth.otherItems, makeNetWorthOtherRow).map(row => [row.label || "Other", fmtMoney(row.client), fmtMoney(row.joint)]),
-    ["Total Net Worth", fmtMoney(lc.netWorth.total), ""],
-  ]), null, denseTable), 12, { compact: true });
-  w.section("Total Debt Payments (New loan + Existing loans)", () => {
-    w.table(["Debt Type", "Lender", "Balance Outstanding ($)", "Monthly Payments ($)"], pdfRows((lc.debt || []).map(d => [d.type, d.lender, fmtMoney(d.balance), fmtMoney(d.monthly)])), null, denseTable);
-    w.fields([["Total Liabilities", fmtMoney(lc.totalLiabilities)], ["% of Total Net Worth (<=30%)", lc.liabPctNetWorth], ["Total Monthly Debt Payments", fmtMoney(lc.totalMonthlyDebt)], ["% of Total Annual Income (<=35%)", lc.debtPctIncome]], 2);
-  }, 12, { compact: true });
-  w.section("Terms and Conditions of the Leverage Loan", () => w.fields([["Principal Loan Amount", fmtMoney(lc.principalLoan)], ["Loan Start Date", fmtDate(lc.loanStartDate)], ["Payment Amount", fmtMoney(lc.paymentAmount)], ["Payment Type", lc.paymentType]], 2), 12, { compact: true });
+
+  w.addPage();
+  w.header("Leverage KYC - Net Worth & Debt", "", "Leverage KYC Page 2");
+  w.y -= 4;
+  compactSection("Total Net Worth ($) - New loan + Existing debts should not exceed 30%", () => w.table(["Asset Type", "Client ($)", "Joint Applicant ($)"], pdfRows([
+    ["Registered Investments (less loans against securities)", fmtMoney(netWorth.regClient), fmtMoney(netWorth.regJoint)],
+    ["Non-Registered Investments (cash & securities less loans)", fmtMoney(netWorth.nonRegClient), fmtMoney(netWorth.nonRegJoint)],
+    ["Fixed Assets", fmtMoney(netWorth.fixedClient), fmtMoney(netWorth.fixedJoint)],
+    ...netOtherRows.map(row => [row.label || "Other", fmtMoney(row.client), fmtMoney(row.joint)]),
+    ["Total Net Worth", fmtMoney(netWorth.total), ""],
+  ]), null, denseTable));
+  compactSection("Total Debt Payments (New loan + Existing loans)", () => {
+    w.table(["Debt Type", "Lender", "Balance Outstanding ($)", "Monthly Payments ($)"], pdfRows((debtRows.length ? debtRows : [{}]).map(d => [d.type, d.lender, fmtMoney(d.balance), fmtMoney(d.monthly)])), null, denseTable);
+    w.table(["Total Liabilities", "% of Net Worth (<=30%)", "Monthly Debt Payments", "% of Annual Income (<=35%)"], [[fmtMoney(lc.totalLiabilities), lc.liabPctNetWorth, fmtMoney(lc.totalMonthlyDebt), lc.debtPctIncome]], null, denseTable);
+  });
+  compactSection("Terms and Conditions of the Leverage Loan", () => w.table(["Principal Loan Amount", "Loan Start Date", "Payment Amount", "Payment Type"], [[fmtMoney(lc.principalLoan), fmtDate(lc.loanStartDate), fmtMoney(lc.paymentAmount), lc.paymentType]], null, denseTable));
+  compactSection("Advisor Notes", compactNotes);
   w.finishPage();
-  w.addPage(); w.header("Leverage KYC - Notes & Disclosure", "", "Leverage KYC Page 3");
-  w.section("General Client Criteria", () => {
-    ["The presence of ANY of the following KYC criteria should result in determination that leveraging may NOT be suitable:", "- Risk tolerance is low (Where a client's risk tolerance is 100% low, leveraging is not permitted.)", "- Person's age is 60 years or greater / Time horizon is less than 5 years", "- Investment loan > 30% of net worth / Total debt payments > 35% of Gross income", "- Investment knowledge is Poor/None / Client relies on spousal income/net worth / Client unable to withstand financial loss"].forEach(t => w.textBlock(t, { size: 7.4, lineH: 3.7, gap: 0.8 }));
-  }, 12, { compact: true });
-  w.section("Advisor Notes", () => w.longField("Notes", lc.notes, 16), 10, { compact: true });
-  w.section("Leveraging Disclosure", () => {
-    [
-      ["Risk of Borrowing to Invest", "Using borrowed money to finance the purchase of securities involves greater risk than a purchase using cash resources only. Your responsibility to repay the loan and pay interest remains the same even if the value of the securities purchased declines."],
-      ["Is it Right for You?", "Borrowing money to invest is risky. You should only consider it if you are comfortable with taking risk, taking on debt to buy investments that may go up or down in value, investing for the long-term, and you have a stable income."],
-      ["You Can End Up Losing Money", "If the investments go down in value and you have borrowed money, your losses would be larger than had you invested using your own money. Whether your investments make money or not, you will still have to pay back the loan plus interest."],
-      ["Tax Considerations", "You should not borrow to invest just to receive a tax deduction. Interest costs are not always tax deductible. Consult a tax professional to determine whether your interest costs will be deductible before borrowing to invest."],
-    ].forEach(([h, t]) => { w.textBlock(`${h}: ${t}`, { size: 7.1, lineH: 3.5, gap: 0.6 }); w.initials(); });
-  }, 12, { compact: true });
-  w.section("Client and Advisor Acknowledgement", () => { w.textBlock("I/We have reviewed this Leveraging Analysis & Disclosure with our advisor, and understand the material features and risks involved with this leveraging strategy.", { size: 7.4, lineH: 3.7 }); w.signature(lc.clientNameAck, "Client"); if (lc.jointNameAck) w.signature(lc.jointNameAck, "Joint Applicant"); w.signature(lc.advisorNameAck || w.profile.advisorName, "Advisor"); }, 12, { compact: true });
+
+  w.addPage();
+  w.header("Leverage KYC - Notes & Disclosure", "", "Leverage KYC Page 3");
+  w.y -= 5;
+  compactSection("General Client Criteria", drawCriteriaGrid);
+  compactSection("Leveraging Disclosure", () => disclosureRows.forEach(drawDisclosureRow));
+  const acknowledgementText = "I/We have reviewed this Leveraging Analysis & Disclosure with our advisor, and understand the material features and risks involved with this leveraging strategy.";
+  const signers = [[lc.clientNameAck, "Client"], [lc.advisorNameAck || w.profile.advisorName, "Advisor"]];
+  if (hasText(lc.jointNameAck)) signers.splice(1, 0, [lc.jointNameAck, "Joint Applicant"]);
+  const acknowledgementLines = w.textLines(acknowledgementText, w.contentW, 7.6);
+  const acknowledgementHeight = 11 + acknowledgementLines.length * 3.5 + Math.ceil(signers.length / 2) * 35.5 + 3;
+  if (w.y + acknowledgementHeight > PDF_VEC.bodyBottom) {
+    w.finishPage();
+    w.addPage();
+    w.header("Leverage KYC - Acknowledgement", "", "Leverage KYC continuation");
+  }
+  compactSection("Client and Advisor Acknowledgement", () => {
+    w.textBlock(acknowledgementText, { size: 7.6, lineH: 3.5, gap: 1.6 });
+    drawCompactSignatureGrid(signers);
+  });
   w.finishPage();
 };
 const drawNonLeverageVector = (w, nl) => {
-  w.addPage(); w.header("Sales suitability summary - segregated funds", "", "Sales Suitability");
-  w.field("Client name(s)", nl.clientNames, w.contentW);
+  const drawChoiceColumns = (groups, widths = null) => {
+    const gap = 5;
+    const available = w.contentW - gap * (groups.length - 1);
+    const colWidths = widths || groups.map(() => available / groups.length);
+    const y0 = w.y;
+    const heights = groups.map((group, idx) => {
+      const width = colWidths[idx];
+      let height = 5;
+      group.items.forEach(item => {
+        const lines = w.textLines(item.label || " ", width - 7, 7.15);
+        height += Math.max(4.2, lines.length * 3.05 + 0.8);
+      });
+      return height + 2;
+    });
+    const rowH = Math.max(...heights);
+    w.ensure(rowH + 2);
+    let x = w.x;
+    groups.forEach((group, idx) => {
+      const width = colWidths[idx];
+      w.setFont(7.75, "bold", PDF_VEC.navy);
+      w.pdf.text(cleanPdfText(group.title), x, y0 + 2.8);
+      let cursorY = y0 + 7;
+      group.items.forEach(item => {
+        const lines = w.textLines(item.label || " ", width - 7, 7.15);
+        if (item.checked === null) {
+          w.setFont(7.15, "normal", PDF_VEC.text);
+          w.drawLines(lines.map((line, lineIndex) => lineIndex === 0 ? `- ${line}` : line), x, cursorY, 3.05);
+        } else {
+          w.pdf.setDrawColor(PDF_VEC.navy);
+          w.pdf.rect(x, cursorY - 2.4, 3.2, 3.2);
+          if (item.checked) {
+            w.setFont(6.6, "bold", PDF_VEC.navy);
+            w.pdf.text("X", x + 0.65, cursorY + 0.25);
+          }
+          w.setFont(7.15, "normal", PDF_VEC.text);
+          w.drawLines(lines, x + 5.2, cursorY, 3.05);
+        }
+        cursorY += Math.max(4.2, lines.length * 3.05 + 0.8);
+      });
+      if (idx < groups.length - 1) {
+        w.pdf.setDrawColor(PDF_VEC.creamDeep);
+        w.pdf.line(x + width + gap / 2, y0, x + width + gap / 2, y0 + rowH - 1);
+      }
+      x += width + gap;
+    });
+    w.y = y0 + rowH + 1.5;
+  };
+  const drawSalesSignatures = () => {
+    const signers = [[nl.clientNames, "Client(s)"], [w.profile.advisorName, "Advisor"]];
+    const gap = 8;
+    const colW = (w.contentW - gap) / 2;
+    const y0 = w.y;
+    signers.forEach(([name, role], idx) => {
+      const x = w.x + idx * (colW + gap);
+      w.setFont(9.2, "bold", PDF_VEC.navy);
+      w.pdf.text(cleanPdfText(name || role), x, y0 + 3);
+      w.setFont(7.2, "bold", PDF_VEC.navy);
+      w.pdf.text(`${role} Signature`, x, y0 + 8);
+      w.pdf.setFillColor("#FFFFFF");
+      w.pdf.setDrawColor(PDF_VEC.gold);
+      w.pdf.rect(x, y0 + 10, colW, 11, "FD");
+      w.setFont(7.2, "bold", PDF_VEC.navy);
+      w.pdf.text("Date", x, y0 + 25);
+      w.pdf.setFillColor("#FFFFFF");
+      w.pdf.setDrawColor(PDF_VEC.gold);
+      w.pdf.rect(x, y0 + 26.5, 56, 9.5, "FD");
+    });
+    w.y = y0 + 36.5;
+  };
+  const selectedFunds = splitMultiLine(nl.fundsRecommended);
+
+  w.addPage();
+  w.header("Sales suitability summary - segregated funds", "", "Sales Suitability - Page 1 of 2");
+  w.prominentField("Client name(s)", nl.clientNames, w.contentW);
   w.section("Client facts", () => {
-    w.fields([["Approximate annual income", nl.annualIncome], ["Approximate net worth (includes spouse Y/N)", nl.netWorth], ["Investment knowledge", nl.investmentKnowledge], ["Risk tolerance", nl.riskTolerance], ["Amount to invest ($)", fmtMoney(nl.amountToInvest)], ["Time horizon", nl.timeHorizon]], 2);
-    w.longField("Additional client facts (e.g., date of birth/age, occupation, dependants, financial obligations - assets, liabilities)", nl.additionalFacts, 14);
-    if (nl.amountToInvestNotes) w.longField("Amount to invest notes", nl.amountToInvestNotes, 10);
+    w.fields([["Approximate annual income", nl.annualIncome], ["Approximate net worth (includes spouse Y/N)", nl.netWorth], ["Investment knowledge", nl.investmentKnowledge], ["Risk tolerance", nl.riskTolerance], ["Amount to invest ($)", fmtMoney(nl.amountToInvest)], ["Time horizon", nl.timeHorizon]], 3, { dense: true });
+    w.longField("Additional client facts (e.g., date of birth/age, occupation, dependants, financial obligations - assets, liabilities)", nl.additionalFacts, 10);
+    if (nl.amountToInvestNotes) w.longField("Amount to invest notes", nl.amountToInvestNotes, 8);
   }, 14, { compact: true });
-  w.section("Need identification", () => {
-    w.textBlock("Reason(s) for selecting segregated funds", { bold: true, size: 7.8, lineH: 3.8, gap: 0.5 });
-    w.check(nl.reasons.guarantees, "Guarantees (maturity/death benefit)"); w.check(nl.reasons.probate, "Probate bypass (N/A in Quebec)"); w.check(nl.reasons.creditor, "Creditor protection"); w.check(nl.reasons.other, `Other${nl.reasons.otherText ? ": " + nl.reasons.otherText : ""}`);
-    w.textBlock("Purpose of investment", { bold: true, size: 7.8, lineH: 3.8, gap: 0.5 });
-    w.check(nl.purpose.savings, "Savings"); w.check(nl.purpose.estate, "Estate planning"); w.check(nl.purpose.retirement, "Retirement fund"); w.check(nl.purpose.resp, "RESP"); w.check(nl.purpose.other, `Other${nl.purpose.otherText ? ": " + nl.purpose.otherText : ""}`);
-    w.textBlock("Time horizon for investment", { bold: true, size: 7.8, lineH: 3.8, gap: 0.5 }); ["1 - 3 years", "4 - 5 years", "6 - 10 years", "More than 10 years"].forEach(v => w.check(nl.timeHorizon === v, v));
-  }, 12, { compact: true });
-  w.section("Risk profile (as determined by discussions/details provided by client)", () => w.longField("Risk profile", nl.riskProfile, 12), 10, { compact: true });
+  w.section("Need identification", () => drawChoiceColumns([
+    { title: "Reason(s) for selecting segregated funds", items: [
+      { checked: !!nl.reasons.guarantees, label: "Guarantees (maturity/death benefit)" },
+      { checked: !!nl.reasons.probate, label: "Probate bypass (N/A in Quebec)" },
+      { checked: !!nl.reasons.creditor, label: "Creditor protection" },
+      { checked: !!nl.reasons.other, label: `Other${nl.reasons.otherText ? ": " + nl.reasons.otherText : ""}` },
+    ] },
+    { title: "Purpose of investment", items: [
+      { checked: !!nl.purpose.savings, label: "Savings" },
+      { checked: !!nl.purpose.estate, label: "Estate planning" },
+      { checked: !!nl.purpose.retirement, label: "Retirement fund" },
+      { checked: !!nl.purpose.resp, label: "RESP" },
+      { checked: !!nl.purpose.other, label: `Other${nl.purpose.otherText ? ": " + nl.purpose.otherText : ""}` },
+    ] },
+    { title: "Time horizon for investment", items: ["1 - 3 years", "4 - 5 years", "6 - 10 years", "More than 10 years"].map(value => ({ checked: nl.timeHorizon === value, label: value })) },
+  ]), 12, { compact: true });
+  w.section("Risk profile (as determined by discussions/details provided by client)", () => w.longField("Risk profile", nl.riskProfile, 9), 10, { compact: true });
   w.finishPage();
-  w.addPage(); w.header("Sales suitability summary - segregated funds", "", "Sales Suitability continued");
+
+  w.addPage();
+  w.header("Sales suitability summary - segregated funds", "", "Sales Suitability - Page 2 of 2");
   w.section("Funds recommended / Guarantees / Fee structure", () => {
-    w.textBlock("Funds recommended", { bold: true, size: 7.8, lineH: 3.8, gap: 0.5 }); (splitMultiLine(nl.fundsRecommended).length ? splitMultiLine(nl.fundsRecommended) : [" "]).forEach(line => w.textBlock(`- ${line}`, { size: 7.3, lineH: 3.5, gap: 0.2 }));
-    w.textBlock("Guarantees (maturity/death benefit)", { bold: true, size: 7.8, lineH: 3.8, gap: 0.5 }); ["75/75 guarantee", "75/100 guarantee", "100/100 guarantee"].forEach(v => w.check(nl.guarantee === v, v));
-    w.textBlock("Fee structure", { bold: true, size: 7.8, lineH: 3.8, gap: 0.5 }); w.check(nl.feeStructure.frontEnd, "Front-end load"); w.check(nl.feeStructure.dsc, "Deferred sales charge"); w.check(nl.feeStructure.lowLoad, "Low-load deferred sales charge"); w.check(nl.feeStructure.other, `Other${nl.feeStructure.otherText ? ": " + nl.feeStructure.otherText : ""}`);
-    w.longField("Support and rationale of fund selection / risk profile / fee structure", nl.rationale, 16);
+    drawChoiceColumns([
+      { title: "Funds recommended", items: (selectedFunds.length ? selectedFunds : [" "]).map(label => ({ checked: null, label })) },
+      { title: "Guarantees (maturity/death benefit)", items: ["75/75 guarantee", "75/100 guarantee", "100/100 guarantee"].map(value => ({ checked: nl.guarantee === value, label: value })) },
+      { title: "Fee structure", items: [
+        { checked: !!nl.feeStructure.frontEnd, label: "Front-end load" },
+        { checked: !!nl.feeStructure.dsc, label: "Deferred sales charge" },
+        { checked: !!nl.feeStructure.lowLoad, label: "Low-load deferred sales charge" },
+        { checked: !!nl.feeStructure.other, label: `Other${nl.feeStructure.otherText ? ": " + nl.feeStructure.otherText : ""}` },
+      ] },
+    ], [w.contentW * 0.46, w.contentW * 0.25, w.contentW * 0.29 - 10]);
+    w.longField("Support and rationale of fund selection / risk profile / fee structure", nl.rationale, 13);
+  }, 14, { compact: true });
+  w.section("Acknowledgement", () => {
+    w.textBlock("I/We have reviewed this Sales Suitability Summary with my advisor and confirm the information above is accurate.", { size: 7.6, lineH: 3.5, gap: 2 });
+    drawSalesSignatures();
   }, 12, { compact: true });
-  w.section("Acknowledgement", () => { w.textBlock("I/We have reviewed this Sales Suitability Summary with my advisor and confirm the information above is accurate.", { size: 7.4, lineH: 3.7 }); w.signature(nl.clientNames, "Client(s)"); w.signature(w.profile.advisorName, "Advisor"); }, 12, { compact: true });
   w.finishPage();
 };
 const normalizeChoice = (value) => cleanPdfText(value).replace(/\s+/g, " ").trim();
@@ -4527,91 +4787,238 @@ const equitableQuestions = [
   { key:"q9", label:"9. With $10,000 to invest, which range after one year would you choose?", options:[{l:"#1: $10,000-$10,200",p:0},{l:"#2: $9,600-$10,600",p:1},{l:"#3: $9,200-$11,000",p:2},{l:"#4: $8,400-$12,000",p:3},{l:"#5: $7,600-$13,000",p:4}] },
   { key:"q10", label:"10. When do you plan to start actively withdrawing the money?", options:[{l:"Less than 3 years.",p:0},{l:"3 to 5 years.",p:2},{l:"6 to 10 years.",p:4},{l:"More than 10 years.",p:6}] },
 ];
+const drawQuestionnaireBar = (w, title) => {
+  w.pdf.setFillColor(PDF_VEC.navy);
+  w.pdf.rect(w.x, w.y - 1.2, w.contentW, 6.4, "F");
+  w.pdf.setFillColor(PDF_VEC.gold);
+  w.pdf.rect(w.x, w.y - 1.2, 0.8, 6.4, "F");
+  w.setFont(8.55, "bold", "#FFFFFF");
+  w.pdf.text(cleanPdfText(title), w.x + 4, w.y + 3.05);
+  w.y += 8.2;
+};
+const drawCompactQuestionColumn = (w, questions, data, x, width) => {
+  let y = w.y;
+  let lastSection = null;
+  const sectionNames = { 1: "Section one", 2: "Section two", 3: "Section three", 4: "Section four", 5: "Section five" };
+  questions.forEach(question => {
+    if (question.sec && question.sec !== lastSection) {
+      lastSection = question.sec;
+      w.setFont(7.35, "bold", PDF_VEC.navy);
+      w.pdf.text(sectionNames[question.sec] || `Section ${question.sec}`, x, y);
+      w.pdf.setDrawColor(PDF_VEC.gold);
+      w.pdf.line(x, y + 1.2, x + width, y + 1.2);
+      y += 5;
+    }
+    const qLines = w.textLines(question.label, width, 6.65);
+    w.setFont(6.65, "bold", PDF_VEC.navy);
+    w.drawLines(qLines, x, y, 2.8);
+    y += qLines.length * 2.8 + 0.7;
+    question.options.forEach(option => {
+      const optionText = `${option.l}${option.p !== undefined ? ` (${option.p} pts)` : ""}`;
+      const lines = w.textLines(optionText, width - 7, 6.05);
+      const lineH = 2.55;
+      const h = Math.max(3.55, lines.length * lineH + 0.45);
+      w.pdf.setDrawColor(PDF_VEC.navy);
+      w.pdf.rect(x + 1.2, y - 2.15, 2.55, 2.55);
+      if (choiceMatches(option.l, data?.[question.key])) {
+        w.setFont(5.5, "bold", PDF_VEC.navy);
+        w.pdf.text("X", x + 1.72, y - 0.12);
+      }
+      w.setFont(6.05, "normal", PDF_VEC.text);
+      w.drawLines(lines, x + 5.7, y, lineH);
+      y += h;
+    });
+    y += 1.1;
+  });
+  return y;
+};
+const drawCanadaQuestionnairePages = (w, title, subtitle, questions, data) => {
+  const pageGroups = [
+    [questions.filter(q => q.sec === 1 || q.sec === 2), questions.filter(q => q.sec === 3)],
+    [questions.filter(q => q.sec === 4), questions.filter(q => q.sec === 5)],
+  ];
+  pageGroups.forEach((columns, pageIndex) => {
+    w.addPage();
+    w.header(title, subtitle, `Canada Life Questionnaire - Questions ${pageIndex + 1} of 2`);
+    drawQuestionnaireBar(w, "Investment Personality Questionnaire");
+    const gap = 7;
+    const colW = (w.contentW - gap) / 2;
+    const y0 = w.y;
+    const endY1 = drawCompactQuestionColumn(w, columns[0], data, w.x, colW);
+    w.y = y0;
+    const endY2 = drawCompactQuestionColumn(w, columns[1], data, w.x + colW + gap, colW);
+    w.y = Math.max(endY1, endY2);
+    w.finishPage();
+  });
+};
+const drawQuestionnaireQuestionPages = (w, { title, subtitle = "", pageLabel, questionTitle, questions, data, drawIntro, tight = false }) => {
+  let pageNumber = 1;
+  const startPage = isFirst => {
+    w.addPage();
+    w.header(title, subtitle, `${pageLabel} - Questions ${pageNumber} of 2`);
+    if (isFirst && drawIntro) drawIntro();
+    drawQuestionnaireBar(w, questionTitle);
+  };
+  startPage(true);
+  questions.forEach(question => {
+    const height = w.questionOptionBlockHeight(question, { compact: true, tight });
+    if (w.y + height > PDF_VEC.bodyBottom - 1) {
+      w.finishPage();
+      pageNumber += 1;
+      startPage(false);
+    }
+    w.questionOptionBlock(question, data?.[question.key], { compact: true, tight });
+  });
+  w.finishPage();
+};
+const drawQuestionnaireResultHeader = (w, title, subtitle, pageLabel) => {
+  w.addPage();
+  w.header(title, subtitle, `${pageLabel} - Results and Signatures`);
+};
+const drawQuestionnaireSignatures = (w, signers, { initialsLabel = "" } = {}) => {
+  const gap = 8;
+  const colW = (w.contentW - gap) / 2;
+  const y0 = w.y;
+  signers.slice(0, 2).forEach(([name, role], idx) => {
+    const x = w.x + idx * (colW + gap);
+    w.setFont(9.2, "bold", PDF_VEC.navy);
+    w.pdf.text(cleanPdfText(name || role), x, y0 + 3);
+    w.setFont(7.2, "bold", PDF_VEC.navy);
+    w.pdf.text(`${role} Signature`, x, y0 + 8);
+    w.pdf.setFillColor("#FFFFFF");
+    w.pdf.setDrawColor(PDF_VEC.gold);
+    w.pdf.rect(x, y0 + 10, colW, 10.5, "FD");
+    w.setFont(7.2, "bold", PDF_VEC.navy);
+    w.pdf.text("Date", x, y0 + 24.5);
+    w.pdf.setFillColor("#FFFFFF");
+    w.pdf.setDrawColor(PDF_VEC.gold);
+    w.pdf.rect(x, y0 + 26, 56, 9.5, "FD");
+    if (idx === 0 && initialsLabel) {
+      const initialX = x + 61;
+      w.setFont(6.8, "bold", PDF_VEC.navy);
+      w.pdf.text(cleanPdfText(initialsLabel), initialX, y0 + 24.5);
+      w.pdf.setFillColor("#FFFFFF");
+      w.pdf.setDrawColor(PDF_VEC.gold);
+      w.pdf.rect(initialX, y0 + 26, 18, 9.5, "FD");
+    }
+  });
+  w.y = y0 + 36;
+};
 const drawInsuranceQuestionnaireVector = (w, sf) => {
   const q = sf.insuranceQuestionnaire || {};
   if (sf.selectedInsuranceCompany === "Manulife") {
     const m = q.manulife || {};
     const score = questionnaireScore(manulifeQuestions, m);
     const profile = score === 0 ? "" : score <= 8 ? "Conservative" : score <= 23 ? "Moderate" : score <= 38 ? "Balanced" : "Growth";
-    w.addPage(); w.header("Manulife Investment Management - Investor Profile Questionnaire", "Segregated fund solutions", "Manulife Questionnaire");
-    w.section("Investor Information", () => w.fields([["Salutation", m.salutation], ["Surname", m.surname], ["First Name", m.firstName], ["Initials", m.initials], ["Date Completed", fmtDate(m.dateCompleted)], ["Address", m.address], ["City", m.city], ["Province", m.province], ["Postal Code", m.postal], ["Home Tel", m.homePhone], ["Business Tel", m.businessPhone], ["Email", m.email], ["Household Income", m.householdIncome], ["Net Financial Assets (incl. spouse)", m.netFinancialAssets], ["Investor Experience", m.experience]], 2), 12, { compact: true });
-    w.section("Investor profile - answer all 8 questions", () => drawQuestionOptions(w, manulifeQuestions, m, { compact: true }), 12, { compact: true });
+    const title = "Manulife Investment Management - Investor Profile Questionnaire";
+    const subtitle = "Segregated fund solutions";
+    drawQuestionnaireQuestionPages(w, {
+      title,
+      subtitle,
+      pageLabel: "Manulife Questionnaire",
+      questionTitle: "Investor profile - answer all 8 questions",
+      questions: manulifeQuestions,
+      data: m,
+      drawIntro: () => w.section("Investor Information", () => w.fields([["Salutation", m.salutation], ["Surname", m.surname], ["First Name", m.firstName], ["Initials", m.initials], ["Date Completed", fmtDate(m.dateCompleted)], ["Address", m.address], ["City", m.city], ["Province", m.province], ["Postal Code", m.postal], ["Home Tel", m.homePhone], ["Business Tel", m.businessPhone], ["Email", m.email], ["Household Income", m.householdIncome], ["Net Financial Assets (incl. spouse)", m.netFinancialAssets], ["Investor Experience", m.experience]], 3, { dense: true }), 10, { compact: true }),
+    });
+    drawQuestionnaireResultHeader(w, title, subtitle, "Manulife Questionnaire");
     w.section("Investor Profile Result", () => drawProfileResult(w, [["Your total score", String(score)], ["My investor profile is", profile || " - "]], [["1-8", "Conservative", "Protecting your money is your chief concern."], ["9-23", "Moderate", "You want your money to grow, but are more concerned about protecting it."], ["24-38", "Balanced", "Balance between growth and security; will accept some risk."], ["39-64", "Growth", "You want to increase your money and can ride the ups and downs."]], ["Score range", "Profile", "Description"], { compact: true }), 12, { compact: true });
-    w.section("Signatures", () => { w.signature(`${m.firstName || ""} ${m.surname || ""}`.trim(), "Client"); w.signature(w.profile.advisorName, "Advisor"); }, 12, { compact: true });
+    w.prominentField("Client Name", `${m.firstName || ""} ${m.surname || ""}`.trim(), w.contentW);
+    w.section("Signatures", () => drawQuestionnaireSignatures(w, [[`${m.firstName || ""} ${m.surname || ""}`.trim(), "Client"], [w.profile.advisorName, "Advisor"]]), 12, { compact: true });
     w.finishPage();
   }
   if (sf.selectedInsuranceCompany === "iA Financial") {
     const ia = q.iaFinancial || {};
     const score = questionnaireScore(iaQuestions, ia);
     const profile = score === 0 ? "" : score <= 26 ? "Prudent" : score <= 55 ? "Moderate" : score <= 89 ? "Balanced" : score <= 119 ? "Growth" : "Aggressive";
-    w.addPage(); w.header("iA FINANCIAL - Your Investor Profile", "F51-122A", "iA FINANCIAL Questionnaire");
-    w.section("Contract / Registration", () => w.fields([["Application Type", ia.applicationType], ["NP Number", ia.npNumber], ["Existing Contract Number", ia.existingContract], ["Type of Registration", Object.keys(ia.registrationType || {}).filter(k => ia.registrationType[k]).join(", ")]], 2), 12, { compact: true });
-    w.section("Information", () => w.fields([["Last and First Name", ia.lastFirstName], ["Date of Birth", fmtDate(ia.dateOfBirth)], ["Profession", ia.profession], ["Employer", ia.employer], ["Employer Since", fmtDate(ia.employerSince)], ["Last Financial Planning", fmtDate(ia.lastFinPlanning)], ["Last Will/Estate Planning", fmtDate(ia.lastWillPlanning)], ["Financial Objectives", ia.financialObjectives]], 2), 12, { compact: true });
-    w.section("Questionnaire", () => drawQuestionOptions(w, iaQuestions, ia, { compact: true }), 12, { compact: true });
+    const title = "iA FINANCIAL - Your Investor Profile";
+    const subtitle = "F51-122A";
+    drawQuestionnaireQuestionPages(w, {
+      title,
+      subtitle,
+      pageLabel: "iA FINANCIAL Questionnaire",
+      questionTitle: "Questionnaire",
+      questions: iaQuestions,
+      data: ia,
+      tight: true,
+      drawIntro: () => {
+        w.section("Contract / Registration", () => w.fields([["Application Type", ia.applicationType], ["NP Number", ia.npNumber], ["Existing Contract Number", ia.existingContract], ["Type of Registration", Object.keys(ia.registrationType || {}).filter(key => ia.registrationType[key]).join(", ")]], 4, { dense: true }), 9, { compact: true });
+        w.section("Information", () => w.fields([["Last and First Name", ia.lastFirstName], ["Date of Birth", fmtDate(ia.dateOfBirth)], ["Profession", ia.profession], ["Employer", ia.employer], ["Employer Since", fmtDate(ia.employerSince)], ["Last Financial Planning", fmtDate(ia.lastFinPlanning)], ["Last Will/Estate Planning", fmtDate(ia.lastWillPlanning)], ["Financial Objectives", ia.financialObjectives]], 4, { dense: true }), 9, { compact: true });
+      },
+    });
+    drawQuestionnaireResultHeader(w, title, subtitle, "iA FINANCIAL Questionnaire");
     w.section("Investor Profile Result", () => drawProfileResult(w, [["Total points", String(score)], ["Investor profile", profile || " - "]], [["From 8 to 26 points", "Prudent profile"], ["From 27 to 55 points", "Moderate profile"], ["From 56 to 89 points", "Balanced profile"], ["From 90 to 119 points", "Growth profile"], ["From 120 to 160 points", "Aggressive profile"]], undefined, { compact: true }), 12, { compact: true });
     w.section("Your investor profile results", () => {
-      w.longField("Choice of investments", ia.choiceOfInvestments, 18);
-      w.fields([["Does your choice correspond to your investor profile?", ia.choiceMatchesProfile], ["Signed in (city)", ia.signedIn], ["On (date)", fmtDate(ia.signedDate)]], 2);
+      w.longField("Choice of investments", ia.choiceOfInvestments, 8);
+      w.fields([["Does your choice correspond to your investor profile?", ia.choiceMatchesProfile], ["Signed in (city)", ia.signedIn], ["On (date)", fmtDate(ia.signedDate)]], 3, { dense: true });
       if (ia.choiceMatchesProfile === "No") {
         w.check(ia.reasonReducedFunds, "I wish to benefit from certain coverages. I understand that the choice of funds offered to me will be reduced and I accept that my investments will differ from those suggested by my profile.");
         w.check(ia.reasonOther, `Other${ia.reasonOtherText ? ": " + ia.reasonOtherText : ""}`);
         w.initials("Client's initials");
       }
-      w.textBlock("I have reviewed this investor profile, I recognize it is accurate and I confirm having received a copy of it.", { size: 8.8 });
+      w.textBlock("I have reviewed this investor profile, I recognize it is accurate and I confirm having received a copy of it.", { size: 8.4, lineH: 4.0, gap: 1 });
     }, 12, { compact: true });
-    w.section("Signatures", () => { w.signature(ia.lastFirstName, "Client"); w.signature(ia.agentName || w.profile.advisorName, "Agent"); w.initials("Client Initials"); }, 12, { compact: true });
+    w.section("Signatures", () => drawQuestionnaireSignatures(w, [[ia.lastFirstName, "Client"], [ia.agentName || w.profile.advisorName, "Agent"]], { initialsLabel: "Client Initials" }), 12, { compact: true });
     w.finishPage();
   }
   if (sf.selectedInsuranceCompany === "Canada Life") {
     const c = q.canadaLife || {};
     const score = questionnaireScore(canadaQuestions, c);
     const personality = score === 0 ? "" : score <= 105 ? "Conservative" : score <= 135 ? "Moderate" : score <= 164 ? "Balanced" : score <= 199 ? "Advanced" : "Aggressive";
-    const sectionTitles = { 1:"Section one - Investment objectives", 2:"Section two - Personal information", 3:"Section three - Investment horizons", 4:"Section four - Attitude towards risk", 5:"Section five - Portfolio volatility" };
-    w.addPage(); w.header("Canada Life - Investment Personality Questionnaire", "Group wealth | Investments", "Canada Life Questionnaire");
-    [1,2,3,4,5].forEach(sec => w.section(sectionTitles[sec], () => drawQuestionOptions(w, canadaQuestions.filter(question => question.sec === sec), c, { compact: true }), 12, { compact: true }));
+    const title = "Canada Life - Investment Personality Questionnaire";
+    const subtitle = "Group wealth | Investments";
+    drawCanadaQuestionnairePages(w, title, subtitle, canadaQuestions, c);
+    drawQuestionnaireResultHeader(w, title, subtitle, "Canada Life Questionnaire");
     w.section("Investment personality result", () => {
       drawProfileResult(w, [["Final total", String(score)], ["Investment personality", personality || " - "]], [["105 or less", "Conservative"], ["106 to 135", "Moderate"], ["136 to 164", "Balanced"], ["165 to 199", "Advanced"], ["200 or more", "Aggressive"]], undefined, { compact: true });
-      w.fields([["Name", c.name], ["Date", fmtDate(c.date)]], 2);
+      w.prominentField("Client Name", c.name, w.contentW);
+      w.fields([["Date", fmtDate(c.date)]], 1, { dense: true });
     }, 12, { compact: true });
-    w.section("Signatures", () => { w.signature(c.name, "Client"); w.signature(w.profile.advisorName, "Advisor"); }, 12, { compact: true });
+    w.section("Signatures", () => drawQuestionnaireSignatures(w, [[c.name, "Client"], [w.profile.advisorName, "Advisor"]]), 12, { compact: true });
     w.finishPage();
   }
   if (sf.selectedInsuranceCompany === "Equitable Life") {
     const e = q.equitableLife || {};
     const score = questionnaireScore(equitableQuestions, e);
     const profile = score === 0 ? "" : score <= 7 ? "Minimal Risk" : score <= 16 ? "Conservative" : score <= 25 ? "Moderate Conservative" : score <= 34 ? "Balanced" : score <= 42 ? "Growth" : "Aggressive Growth";
-    w.addPage(); w.header("Equitable Investor Profile Questionnaire", "", "Equitable Questionnaire");
-    w.textBlock("Before you invest, it's important to understand your investor profile. This short questionnaire will help you identify your investment style - based on your goals, comfort with risk, and time horizon. Your results will point you to one of six investor styles, helping you choose a portfolio that best aligns with your needs.", { size: 7.2, lineH: 3.6, gap: 1 });
-    w.section("Investor Profile Questionnaire", () => drawQuestionOptions(w, equitableQuestions, e, { compact: true }), 12, { compact: true });
-    w.section("Investor Profile Result", () => {
-      drawProfileResult(w, [["Total Score", String(score)], ["Investor profile type", profile || " - "]], [["0-7", "Minimal Risk"], ["8-16", "Conservative"], ["17-25", "Moderate Conservative"], ["26-34", "Balanced"], ["35-42", "Growth"], ["43-50", "Aggressive Growth"]], undefined, { compact: true });
-      w.prominentField("Client Name", e.clientName, w.contentW);
-    }, 12, { compact: true });
-    w.section("Signatures", () => { w.signature(e.clientName, "Client"); w.signature(w.profile.advisorName, "Advisor"); }, 12, { compact: true });
+    const title = "Equitable Investor Profile Questionnaire";
+    drawQuestionnaireQuestionPages(w, {
+      title,
+      pageLabel: "Equitable Questionnaire",
+      questionTitle: "Investor Profile Questionnaire",
+      questions: equitableQuestions,
+      data: e,
+      drawIntro: () => w.textBlock("Before you invest, it's important to understand your investor profile. This short questionnaire will help you identify your investment style - based on your goals, comfort with risk, and time horizon. Your results will point you to one of six investor styles, helping you choose a portfolio that best aligns with your needs.", { size: 7.5, lineH: 3.65, gap: 1.4 }),
+    });
+    drawQuestionnaireResultHeader(w, title, "", "Equitable Questionnaire");
+    w.section("Investor Profile Result", () => drawProfileResult(w, [["Total Score", String(score)], ["Investor profile type", profile || " - "]], [["0-7", "Minimal Risk"], ["8-16", "Conservative"], ["17-25", "Moderate Conservative"], ["26-34", "Balanced"], ["35-42", "Growth"], ["43-50", "Aggressive Growth"]], undefined, { compact: true }), 12, { compact: true });
+    w.prominentField("Client Name", e.clientName, w.contentW);
+    w.section("Signatures", () => drawQuestionnaireSignatures(w, [[e.clientName, "Client"], [w.profile.advisorName, "Advisor"]]), 12, { compact: true });
     w.finishPage();
   }
 };
 const drawLifeInsuranceVector = (w, li) => {
   const num = (x) => Number(x || 0);
-  const investmentProperties = ensureRows(li.fixedAssets.investmentProperties, makeInvestmentPropertyRow);
-  const otherLiquidItems = ensureRows(li.liquidAssets.otherItems, makeOtherLiquidRow);
+  const investmentProperties = ensureRows(li.fixedAssets.investmentProperties, makeInvestmentPropertyRow).filter(row => hasText(row.marketValue) || hasText(row.loan) || (hasText(row.name) && row.name.trim().toLowerCase() !== "investment property"));
+  const otherLiquidItems = ensureRows(li.liquidAssets.otherItems, makeOtherLiquidRow).filter(row => hasText(row.marketValue) || hasText(row.loan) || (hasText(row.name) && row.name.trim().toLowerCase() !== "other liquid asset"));
   const fixedTotalNet = (num(li.fixedAssets.principalMV) + investmentProperties.reduce((s,r)=>s+num(r.marketValue),0)) - (num(li.fixedAssets.principalLoan) + investmentProperties.reduce((s,r)=>s+num(r.loan),0));
   const liqTotalNet = (num(li.liquidAssets.regMV)+num(li.liquidAssets.nonRegMV)+num(li.liquidAssets.bankMV)+otherLiquidItems.reduce((s,r)=>s+num(r.marketValue),0)) - (num(li.liquidAssets.regLoan)+num(li.liquidAssets.nonRegLoan)+num(li.liquidAssets.bankLoan)+otherLiquidItems.reduce((s,r)=>s+num(r.loan),0));
   const totalNetWorth = fixedTotalNet + liqTotalNet + num(li.businessAssets.fmv) + num(li.foreignAssets.withProofValue) + num(li.foreignAssets.withoutProofValue);
   const earned = num(li.earnedIncome);
   const maxCI = earned * num(li.ciIncomeMultiple) + num(li.ciMortgage);
   const maxLife = earned * num(li.lifeIncomeMultiple) + num(li.lifeMortgage);
-  const denseTable = { dense: true, noPageBreak: true };
+  const denseTable = { dense: true, micro: investmentProperties.length + otherLiquidItems.length > 4, noPageBreak: true };
+  const secondPageTable = { ...denseTable, micro: true };
   const lifeSection = (title, fn) => {
     w.pdf.setFillColor(PDF_VEC.navy);
-    w.pdf.rect(w.x, w.y - 1.5, w.contentW, 6.2, "F");
+    w.pdf.rect(w.x, w.y - 1.2, w.contentW, 5.5, "F");
     w.pdf.setFillColor(PDF_VEC.gold);
-    w.pdf.rect(w.x, w.y - 1.5, 0.8, 6.2, "F");
-    w.setFont(8.4, "bold", "#FFFFFF");
-    w.pdf.text(cleanPdfText(title), w.x + 4, w.y + 3);
-    w.y += 7.3;
+    w.pdf.rect(w.x, w.y - 1.2, 0.8, 5.5, "F");
+    w.setFont(8.1, "bold", "#FFFFFF");
+    w.pdf.text(cleanPdfText(title), w.x + 4, w.y + 2.7);
+    w.y += 6.2;
     fn();
-    w.y += 1.6;
+    w.y += 0.8;
   };
   const denseSummaryGrid = (items, columns = 2) => {
     const gap = 3;
@@ -4623,42 +5030,45 @@ const drawLifeInsuranceVector = (w, li) => {
         const x = w.x + idx * (colW + gap);
         w.pdf.setFillColor(PDF_VEC.panel);
         w.pdf.setDrawColor(PDF_VEC.creamDeep);
-        w.pdf.rect(x, y0, colW, 8.8, "FD");
+        w.pdf.rect(x, y0, colW, 7.8, "FD");
         w.setFont(6.2, "bold", PDF_VEC.soft);
-        w.pdf.text(cleanPdfText(item[0]), x + 2, y0 + 3.3);
+        w.pdf.text(cleanPdfText(item[0]), x + 2, y0 + 3);
         w.setFont(7.8, "bold", PDF_VEC.text);
-        w.pdf.text(cleanPdfText(item[1] || " - "), x + 2, y0 + 7);
+        w.pdf.text(cleanPdfText(item[1] || " - "), x + 2, y0 + 6.4);
       });
-      w.y += 10;
+      w.y += 8.8;
     }
   };
   const denseSignatureRow = () => {
-    const signatureTop = Math.max(w.y + 3, 219);
+    const signatureTop = Math.max(w.y + 1.2, 158);
     w.y = signatureTop;
     w.setFont(8.4, "bold", PDF_VEC.navy);
     w.pdf.text("Signatures", w.x, w.y);
     w.y += 4.5;
     w.setFont(6.8, "normal", PDF_VEC.text);
-    w.pdf.text(w.textLines("I/We confirm that the information presented in this Insurance Needs Analysis has been reviewed with my/our advisor and is accurate to the best of my/our knowledge.", w.contentW, 6.8), w.x, w.y);
-    w.y += 8.5;
+    const acknowledgementLines = w.textLines("I/We confirm that the information presented in this Insurance Needs Analysis has been reviewed with my/our advisor and is accurate to the best of my/our knowledge.", w.contentW, 6.8);
+    w.drawLines(acknowledgementLines, w.x, w.y, 3.35);
+    w.y += acknowledgementLines.length * 3.35 + 3;
+    const signers = [[li.policyOwnerName || li.clientName, "Policy Owner"], [li.advisorName || w.profile.advisorName, "Advisor"]];
     const gap = 8;
-    const groupW = (w.contentW - gap) / 2;
-    const sigW = groupW - 38;
-    const dateW = 34;
+    const colW = (w.contentW - gap) / 2;
     const y0 = w.y;
-    [[li.policyOwnerName || li.clientName, "Policy Owner"], [li.advisorName || w.profile.advisorName, "Advisor"]].forEach((item, idx) => {
-      const x = w.x + idx * (groupW + gap);
-      w.setFont(8.2, "bold", PDF_VEC.navy);
-      w.pdf.text(cleanPdfText(item[0] || item[1]), x, y0);
-      w.setFont(6.4, "bold", PDF_VEC.navy);
-      w.pdf.text(`${item[1]} Signature`, x, y0 + 5);
-      w.pdf.text("Date", x + sigW + 4, y0 + 5);
+    signers.forEach(([name, role], idx) => {
+      const x = w.x + idx * (colW + gap);
+      w.setFont(9.2, "bold", PDF_VEC.navy);
+      w.pdf.text(cleanPdfText(name || role), x, y0 + 3);
+      w.setFont(7.2, "bold", PDF_VEC.navy);
+      w.pdf.text(`${role} Signature`, x, y0 + 7.6);
       w.pdf.setFillColor("#FFFFFF");
       w.pdf.setDrawColor(PDF_VEC.gold);
-      w.pdf.rect(x, y0 + 7, sigW, 10.5, "FD");
-      w.pdf.rect(x + sigW + 4, y0 + 7, dateW, 10.5, "FD");
+      w.pdf.rect(x, y0 + 9.2, colW, 9.8, "FD");
+      w.setFont(7.2, "bold", PDF_VEC.navy);
+      w.pdf.text("Date", x, y0 + 22.3);
+      w.pdf.setFillColor("#FFFFFF");
+      w.pdf.setDrawColor(PDF_VEC.gold);
+      w.pdf.rect(x, y0 + 23.7, 56, 9.5, "FD");
     });
-    w.y = y0 + 19.5;
+    w.y = y0 + 33.5;
   };
   w.addPage(); w.header("Insurance Needs Analysis", "", "Life Insurance Needs Analysis - Page 1");
   w.section("Client Information", () => w.fields([["Client's Name", li.clientName], ["Occupation", li.occupation], ["Age", li.age], ["Industry", li.industry], ["Earned Income", fmtMoney(li.earnedIncome)], ["Unearned Income", fmtMoney(li.unearnedIncome)], ["Spouse Income", fmtMoney(li.spouseIncome)]], 3, { dense: true }), 10, { compact: true });
@@ -4667,43 +5077,94 @@ const drawLifeInsuranceVector = (w, li) => {
   w.section("Business Assets", () => w.table(["Asset", "Annual Revenue", "Annual Net Income", "Business FMV"], pdfRows([["Business values", fmtMoney(li.businessAssets.revenue), fmtMoney(li.businessAssets.netIncome), fmtMoney(li.businessAssets.fmv)]]), null, denseTable), 12, { compact: true });
   w.finishPage();
   w.addPage(); w.header("Insurance Needs Analysis", "Foreign Assets & Coverage", "Life Insurance Needs Analysis - Page 2");
-  w.y -= 7;
-  lifeSection("Foreign Assets", () => w.table(["Foreign Asset", "FMV", "Recognized Value", "Net Worth"], pdfRows([["With proof (T1135, bank stmnt, etc)", fmtMoney(li.foreignAssets.withProofFMV), fmtMoney(li.foreignAssets.withProofValue), fmtMoney(li.foreignAssets.withProofValue)], ["Without proof", fmtMoney(li.foreignAssets.withoutProofFMV), fmtMoney(li.foreignAssets.withoutProofValue), fmtMoney(li.foreignAssets.withoutProofValue)]]), null, denseTable));
+  w.y -= 10;
+  lifeSection("Foreign Assets", () => w.table(["Foreign Asset", "FMV", "Recognized Value", "Net Worth"], pdfRows([["With proof (T1135, bank stmnt, etc)", fmtMoney(li.foreignAssets.withProofFMV), fmtMoney(li.foreignAssets.withProofValue), fmtMoney(li.foreignAssets.withProofValue)], ["Without proof", fmtMoney(li.foreignAssets.withoutProofFMV), fmtMoney(li.foreignAssets.withoutProofValue), fmtMoney(li.foreignAssets.withoutProofValue)]]), null, secondPageTable));
   lifeSection("Net Worth Summary", () => denseSummaryGrid([["Fixed Assets - Net", fmtMoney(fixedTotalNet)], ["Liquid Assets - Net", fmtMoney(liqTotalNet)], ["Business FMV", fmtMoney(li.businessAssets.fmv)], ["Foreign Assets", fmtMoney(num(li.foreignAssets.withProofValue)+num(li.foreignAssets.withoutProofValue))], ["Total Net Worth", fmtMoney(totalNetWorth)], ["ACB of Net Worth", fmtMoney(li.acbNetWorth)]], 3));
-  lifeSection("Coverage & Premium", () => w.table(["Item", "Critical Illness", "Life Insurance"], pdfRows([["Income replacement", `${li.ciIncomeMultiple || "0"} x income = ${fmtMoney(earned*num(li.ciIncomeMultiple))}`, `${li.lifeIncomeMultiple || "0"} x income = ${fmtMoney(earned*num(li.lifeIncomeMultiple))}`], ["Mortgage protection", fmtMoney(li.ciMortgage), fmtMoney(li.lifeMortgage)], ["Maximum coverage", fmtMoney(maxCI), fmtMoney(maxLife)], ["In-force coverage", fmtMoney(li.inForceCI), fmtMoney(li.inForceLife)], ["New coverage to be placed", fmtMoney(li.newCoverageCI), fmtMoney(li.newCoverageLife)], ["Annual premium / suitability", fmtMoney(li.annualPremium), "Reviewed"]]), [w.contentW * 0.34, w.contentW * 0.33, w.contentW * 0.33], denseTable));
+  lifeSection("Coverage & Premium", () => w.table(["Item", "Critical Illness", "Life Insurance"], pdfRows([["Income replacement", `${li.ciIncomeMultiple || "0"} x income = ${fmtMoney(earned*num(li.ciIncomeMultiple))}`, `${li.lifeIncomeMultiple || "0"} x income = ${fmtMoney(earned*num(li.lifeIncomeMultiple))}`], ["Mortgage protection", fmtMoney(li.ciMortgage), fmtMoney(li.lifeMortgage)], ["Maximum coverage", fmtMoney(maxCI), fmtMoney(maxLife)], ["In-force coverage", fmtMoney(li.inForceCI), fmtMoney(li.inForceLife)], ["New coverage to be placed", fmtMoney(li.newCoverageCI), fmtMoney(li.newCoverageLife)], ["Annual premium / suitability", fmtMoney(li.annualPremium), "Reviewed"]]), [w.contentW * 0.34, w.contentW * 0.33, w.contentW * 0.33], secondPageTable));
   denseSignatureRow();
   w.finishPage();
 };
-const reasonBlockHeight = (w, block) => {
-  const size = block.type === "heading" ? 10 : 9.15;
-  const lineH = block.type === "heading" ? 4.35 : 4.55;
-  return w.textLines(block.text, w.contentW, size).length * lineH + (block.type === "heading" ? 3.0 : 4.1);
+const REASON_STYLES = [
+  { bodySize: 9.5, bodyLineH: 4.9, bodyGap: 2.8, headingSize: 10.5, headingLineH: 4.8, headingGap: 2.1 },
+  { bodySize: 9.2, bodyLineH: 4.65, bodyGap: 2.35, headingSize: 10.1, headingLineH: 4.55, headingGap: 1.8 },
+];
+const reasonTextStyle = (style, block) => {
+  if (block.type === "heading") return { size: style.headingSize, lineH: style.headingLineH, gap: style.headingGap, bold: true };
+  if (block.type === "meta") return { size: style.bodySize, lineH: style.bodyLineH, gap: 2.1, bold: false };
+  if (block.type === "salutation") return { size: style.bodySize, lineH: style.bodyLineH, gap: 2.6, bold: false };
+  return { size: style.bodySize, lineH: style.bodyLineH, gap: style.bodyGap, bold: false };
 };
-const REASON_BODY_BOTTOM = PDF_VEC.footerY - 12;
+const reasonBlockMetrics = (w, block, style) => {
+  const textStyle = reasonTextStyle(style, block);
+  const lines = w.textLines(block.text, w.contentW, textStyle.size);
+  return { ...textStyle, lines, height: lines.length * textStyle.lineH + textStyle.gap };
+};
+const REASON_BODY_BOTTOM = PDF_VEC.reasonBodyBottom;
+const REASON_SIGNATURE_HEIGHT = 36;
 const drawReasonWhyBlocksVector = (w, blocks, subtitle, clientName, { addAcknowledgement = false } = {}) => {
   const normalizedBlocks = addAcknowledgement ? withClientAcknowledgement(blocks) : blocks;
   if (!normalizedBlocks.length) return;
   w.preventAutoPageBreak = false;
   w.currentHeader = null;
-  w.addPage({ margin: PDF_VEC.reasonMargin });
-  w.reasonHeader("Reason Why Letter", subtitle);
-  normalizedBlocks.forEach((block, idx) => {
-    const next = normalizedBlocks[idx + 1];
-    let keepH = reasonBlockHeight(w, block);
-    if (block.type === "heading" && next?.type === "paragraph") keepH += reasonBlockHeight(w, next);
-    if (w.y + keepH > REASON_BODY_BOTTOM) {
-      w.finishPage();
-      w.addPage({ margin: PDF_VEC.reasonMargin });
-      w.reasonHeader("Reason Why Letter", subtitle, true);
-    }
-    if (block.type === "heading") w.textBlock(block.text, { size: 10, lineH: 4.35, bold: true, gap: 2.4 });
-    else w.textBlock(block.text, { size: 9.15, lineH: 4.55, gap: 3.0 });
-  });
-  if (w.y + 36 > REASON_BODY_BOTTOM) {
-    w.finishPage();
+  const estimatedTop = PDF_VEC.reasonMargin + 8 + 18;
+  const pageCapacity = REASON_BODY_BOTTOM - estimatedTop;
+  const style = REASON_STYLES.find(candidate => {
+    const total = normalizedBlocks.reduce((sum, block) => sum + reasonBlockMetrics(w, block, candidate).height, 0);
+    return total + REASON_SIGNATURE_HEIGHT <= pageCapacity * 2;
+  }) || REASON_STYLES[REASON_STYLES.length - 1];
+  const metrics = normalizedBlocks.map(block => reasonBlockMetrics(w, block, style));
+  const totalBodyHeight = metrics.reduce((sum, metric) => sum + metric.height, 0);
+  const plannedPages = totalBodyHeight + REASON_SIGNATURE_HEIGHT <= pageCapacity
+    ? 1
+    : Math.max(2, Math.ceil((totalBodyHeight + REASON_SIGNATURE_HEIGHT) / pageCapacity));
+  const minimumFinalBody = Math.min(70, Math.max(48, totalBodyHeight * 0.32));
+  const minimumFirstBody = totalBodyHeight - (pageCapacity - REASON_SIGNATURE_HEIGHT);
+  const balancedFirstBody = plannedPages === 2
+    ? Math.min(pageCapacity, Math.max(minimumFirstBody, totalBodyHeight - minimumFinalBody))
+    : pageCapacity;
+  let reasonPage = 0;
+  let pageStartY = estimatedTop;
+  let pageLimitY = REASON_BODY_BOTTOM;
+  const startReasonPage = () => {
+    reasonPage += 1;
     w.addPage({ margin: PDF_VEC.reasonMargin });
-    w.reasonHeader("Reason Why Letter", subtitle, true);
-  }
+    w.reasonHeader("Reason Why Letter", subtitle, reasonPage > 1);
+    pageStartY = w.y;
+    if (plannedPages === 1 || reasonPage === plannedPages) pageLimitY = REASON_BODY_BOTTOM - REASON_SIGNATURE_HEIGHT;
+    else if (plannedPages === 2 && reasonPage === 1) pageLimitY = Math.min(REASON_BODY_BOTTOM, pageStartY + balancedFirstBody);
+    else pageLimitY = REASON_BODY_BOTTOM;
+  };
+  const nextReasonPage = () => {
+    w.finishPage();
+    startReasonPage();
+  };
+  startReasonPage();
+  normalizedBlocks.forEach((block, blockIndex) => {
+    const metric = metrics[blockIndex];
+    const nextBlock = normalizedBlocks[blockIndex + 1];
+    if (block.type === "heading" && nextBlock) {
+      const nextMetric = metrics[blockIndex + 1];
+      const keepHeight = metric.height + Math.min(2, nextMetric.lines.length) * nextMetric.lineH;
+      if (w.y + keepHeight > pageLimitY) nextReasonPage();
+    }
+    let remaining = [...metric.lines];
+    while (remaining.length) {
+      let availableLines = Math.floor((pageLimitY - w.y - metric.gap) / metric.lineH);
+      if (availableLines < Math.min(2, remaining.length)) {
+        nextReasonPage();
+        availableLines = Math.floor((pageLimitY - w.y - metric.gap) / metric.lineH);
+      }
+      let take = Math.min(remaining.length, Math.max(1, availableLines));
+      if (remaining.length - take === 1 && take > 2) take -= 1;
+      const chunk = remaining.splice(0, take);
+      w.setFont(metric.size, metric.bold ? "bold" : "normal", PDF_VEC.text);
+      w.drawLines(chunk, w.x, w.y, metric.lineH);
+      w.y += chunk.length * metric.lineH;
+      if (remaining.length) nextReasonPage();
+      else w.y += metric.gap;
+    }
+  });
+  if (w.y + REASON_SIGNATURE_HEIGHT > REASON_BODY_BOTTOM) nextReasonPage();
   w.signature(clientName, "Client");
   w.finishPage();
   w.currentHeader = null;
