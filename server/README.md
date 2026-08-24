@@ -113,7 +113,10 @@ Expected: `{ "ok": true, "hasClientId": true, "hasClientSecret": true, "hasRefre
 
 ## 5. Use the portal
 
-Open **http://localhost:3000/** in your browser. The portal now talks to this backend at `/api/adobe-sign/send`.
+Open **http://192.168.50.158:3000/** while connected to the same private network as the NAS.
+The NAS issues a local session automatically, so the hosted portal does not show a password screen.
+Requests arriving through the public Cloudflare tunnel cannot create sessions or access drafts,
+password changes, or Adobe Sign. The public health endpoint remains available for uptime checks.
 
 When you reach the **Review & Generate PDF** step:
 
@@ -129,6 +132,9 @@ When you reach the **Review & Generate PDF** step:
 ### `POST /api/auth/login`
 
 Authenticates the portal password and returns a temporary session token.
+When `remember` is enabled, the signed trusted-device token remains valid for
+180 days and survives routine NAS/container restarts. Changing the portal
+password invalidates all previously issued signed tokens.
 
 ### `GET /api/drafts` / `PUT /api/drafts`
 

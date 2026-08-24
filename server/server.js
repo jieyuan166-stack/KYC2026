@@ -63,6 +63,9 @@ const DRAFTS_PATH = path.join(DATA_DIR, "drafts.json");
 const AUTH_PATH = path.join(DATA_DIR, "auth.json");
 const MAX_DRAFTS_PAYLOAD_BYTES = 28_000_000;
 const authSessions = new Map();
+const SESSION_TOKEN_VERSION = 2;
+const STANDARD_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const TRUSTED_DEVICE_TTL_MS = 180 * 24 * 60 * 60 * 1000;
 const DATA_UID = Number.parseInt(process.env.KYC_DATA_UID || "", 10);
 const DATA_GID = Number.parseInt(process.env.KYC_DATA_GID || "", 10);
 
@@ -106,12 +109,43 @@ const getActivePasswordHash = () => {
   return auth?.passwordHash || DEFAULT_KYC_PASSWORD_HASH;
 };
 
+const sessionSigningKey = () => crypto
+  .createHash("sha256")
+  .update(`triton-kyc-session-v${SESSION_TOKEN_VERSION}:${getActivePasswordHash()}`, "utf8")
+  .digest();
+
+const signSessionPayload = (encodedPayload) => crypto
+  .createHmac("sha256", sessionSigningKey())
+  .update(encodedPayload, "utf8")
+  .digest("base64url");
+
 const createSession = (remember) => {
-  const token = crypto.randomBytes(32).toString("hex");
-  const ttlMs = remember ? 30 * 24 * 60 * 60 * 1000 : 12 * 60 * 60 * 1000;
+  const ttlMs = remember ? TRUSTED_DEVICE_TTL_MS : STANDARD_SESSION_TTL_MS;
   const expiresAt = Date.now() + ttlMs;
-  authSessions.set(token, expiresAt);
+  const payload = Buffer.from(JSON.stringify({
+    v: SESSION_TOKEN_VERSION,
+    iat: Date.now(),
+    exp: expiresAt,
+    nonce: crypto.randomBytes(16).toString("hex"),
+  }), "utf8").toString("base64url");
+  const token = `${payload}.${signSessionPayload(payload)}`;
   return { token, expiresAt };
+};
+
+const verifySignedSession = (token) => {
+  try {
+    if (typeof token !== "string" || token.length > 1024) return null;
+    const parts = token.split(".");
+    if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+    const expected = Buffer.from(signSessionPayload(parts[0]), "utf8");
+    const received = Buffer.from(parts[1], "utf8");
+    if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) return null;
+    const payload = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
+    if (payload?.v !== SESSION_TOKEN_VERSION || !Number.isFinite(payload?.exp) || payload.exp <= Date.now()) return null;
+    return payload.exp;
+  } catch {
+    return null;
+  }
 };
 
 const getBearerToken = (req) => {
@@ -120,9 +154,30 @@ const getBearerToken = (req) => {
   return String(req.get("x-kyc-session-token") || "").trim();
 };
 
+const isPrivateAddress = (rawAddress) => {
+  const address = String(rawAddress || "").trim().toLowerCase().replace(/^::ffff:/, "");
+  if (!address) return false;
+  if (address === "::1" || address === "127.0.0.1" || address === "localhost") return true;
+  if (address.startsWith("10.") || address.startsWith("192.168.")) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(address)) return true;
+  return address.startsWith("fc") || address.startsWith("fd") || address.startsWith("fe80:");
+};
+
+const isTrustedLocalRequest = (req) => {
+  // Cloudflare always adds these headers. Rejecting them ensures that a valid
+  // token cannot be reused through the public tunnel.
+  if (req.get("cf-connecting-ip") || req.get("cf-ray")) return false;
+  return isPrivateAddress(req.socket?.remoteAddress);
+};
+
 const requirePortalSession = (req, res, next) => {
+  if (!isTrustedLocalRequest(req)) {
+    return res.status(403).json({ ok: false, error: "Local network access required" });
+  }
   const token = getBearerToken(req);
-  const expiresAt = authSessions.get(token);
+  // Legacy in-memory tokens remain valid until the next restart; signed tokens
+  // let trusted browsers stay authenticated across routine NAS container restarts.
+  const expiresAt = verifySignedSession(token) || authSessions.get(token);
   if (!token || !expiresAt || expiresAt <= Date.now()) {
     if (token) authSessions.delete(token);
     return res.status(401).json({ ok: false, error: "Unauthorized" });
@@ -172,7 +227,22 @@ app.get("/api/health", (req, res) => {
 });
 
 /* -------------------------------------------------------- */
+app.get("/api/auth/network", (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ ok: true, local: isTrustedLocalRequest(req) });
+});
+
+app.post("/api/auth/local-session", (req, res) => {
+  if (!isTrustedLocalRequest(req)) {
+    return res.status(403).json({ ok: false, error: "Local network access required" });
+  }
+  res.json({ ok: true, ...createSession(true) });
+});
+
 app.post("/api/auth/login", (req, res) => {
+  if (!isTrustedLocalRequest(req)) {
+    return res.status(403).json({ ok: false, error: "Local network access required" });
+  }
   const { password, remember } = req.body || {};
   if (typeof password !== "string" || password.length > 200) {
     return res.status(400).json({ ok: false, error: "Invalid password" });
@@ -220,7 +290,7 @@ app.put("/api/drafts", requirePortalSession, (req, res) => {
 });
 
 /* -------------------------------------------------------- */
-app.post("/api/adobe-sign/send", limitAdobeSend, async (req, res) => {
+app.post("/api/adobe-sign/send", requirePortalSession, limitAdobeSend, async (req, res) => {
   try {
     const { pdfBase64, fileName, agreementName, signers, message } = req.body || {};
 

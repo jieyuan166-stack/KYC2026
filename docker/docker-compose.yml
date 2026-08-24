@@ -10,7 +10,7 @@ services:
     environment:
       PORT: "3000"
       NODE_ENV: "production"
-      ALLOWED_ORIGINS: "https://kyc.tritonwealth.ca,http://localhost:3000"
+      ALLOWED_ORIGINS: "https://kyc.tritonwealth.ca,http://localhost:3000,http://192.168.50.158:3000"
       KYC_DATA_UID: "1000"
       KYC_DATA_GID: "10"
     ports:
