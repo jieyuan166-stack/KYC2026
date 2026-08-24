@@ -205,6 +205,10 @@
   table.kyc-table th, table.kyc-table td { border: 1px solid #d8d3c4; padding: 8px 10px; font-size: 13px; vertical-align: top; }
   table.kyc-table th { background: var(--c-cream-deep); color: var(--c-bg-deep); text-align: left; font-weight: 600; font-family: var(--f-sans); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
   table.kyc-table tr:nth-child(even) td { background: #fafaf6; }
+  @media (max-width: 640px) {
+    table.kyc-table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    table.kyc-table > thead, table.kyc-table > tbody { min-width: 620px; display: table; width: 100%; table-layout: fixed; }
+  }
 
   /* Hero banner (welcome on step 1) */
   .hero-banner {
@@ -791,6 +795,124 @@ const makeOtherLiquidRow = (row = {}) => ({
   marketValue: row.marketValue ?? row.mv ?? row.otherMV ?? "",
   loan: row.loan ?? row.otherLoan ?? "",
 });
+const LIFE_NEEDS_TEMPLATE_OPTIONS = [
+  { value: "blank", label: "General / Blank" },
+  { value: "investor", label: "Investor" },
+  { value: "businessOwner", label: "Business Owner" },
+  { value: "employee", label: "Employee" },
+  { value: "child", label: "Child" },
+];
+const lifeNeedsTemplateLabel = (value) => LIFE_NEEDS_TEMPLATE_OPTIONS.find(option => option.value === value)?.label || "General / Blank";
+const makeBusinessAssetRow = (row = {}) => ({
+  id: row.id || makeRowId(),
+  name: row.name || row.label || "Business",
+  revenue: row.revenue ?? row.annualRevenue ?? "",
+  netIncome: row.netIncome ?? row.annualNetIncome ?? "",
+  fmv: row.fmv ?? row.marketValue ?? "",
+});
+const makeLifeNeedsGuideline = (guideline = {}, li = {}) => ({
+  ciAutoValue: guideline.ciAutoValue ?? "",
+  lifeAutoValue: guideline.lifeAutoValue ?? "",
+  ciManualOverride: guideline.ciManualOverride ?? hasText(li.ciIncomeMultiple),
+  lifeManualOverride: guideline.lifeManualOverride ?? hasText(li.lifeIncomeMultiple),
+});
+const makeLifeNeedsChild = (child = {}) => ({
+  lifeInsuredName: child.lifeInsuredName || "",
+  gender: child.gender || "",
+  age: child.age || "",
+  parentLifeInForceFather: child.parentLifeInForceFather || "",
+  parentLifeInForceMother: child.parentLifeInForceMother || "",
+  parentLifePendingFather: child.parentLifePendingFather || "",
+  parentLifePendingMother: child.parentLifePendingMother || "",
+  parentCIInForceFather: child.parentCIInForceFather || "",
+  parentCIInForceMother: child.parentCIInForceMother || "",
+  parentCIPendingFather: child.parentCIPendingFather || "",
+  parentCIPendingMother: child.parentCIPendingMother || "",
+  purposeHeadStart: !!child.purposeHeadStart,
+  purposeTaxSheltered: !!child.purposeTaxSheltered,
+  notes: child.notes || "",
+});
+const standardLifeFinancialGuideline = (rawAge) => {
+  const age = Number(rawAge);
+  if (!Number.isFinite(age) || age < 16) return { valid: false, age, message: "Manual review required for clients under age 16 or when age is missing." };
+  let ciMultiple = 5;
+  let ciFloor = 150000;
+  if (age <= 55) { ciMultiple = 10; ciFloor = 250000; }
+  else if (age <= 60) { ciMultiple = 7; ciFloor = 200000; }
+
+  if (age <= 30) return { valid: true, age, ciMultiple, ciFloor, lifeMultiple: 30, lifeFloor: 500000, lifeIndividualConsideration: false };
+  if (age <= 40) return { valid: true, age, ciMultiple, ciFloor, lifeMultiple: 25, lifeFloor: 500000, lifeIndividualConsideration: false };
+  if (age <= 50) return { valid: true, age, ciMultiple, ciFloor, lifeMultiple: 20, lifeFloor: 500000, lifeIndividualConsideration: false };
+  if (age <= 60) return { valid: true, age, ciMultiple, ciFloor, lifeMultiple: 15, lifeFloor: 250000, lifeIndividualConsideration: false };
+  if (age <= 69) return { valid: true, age, ciMultiple, ciFloor, lifeMultiple: 10, lifeFloor: 250000, lifeIndividualConsideration: false };
+  return { valid: true, age, ciMultiple, ciFloor, lifeMultiple: null, lifeFloor: 100000, lifeIndividualConsideration: true };
+};
+const netWorthPremiumLimit = (netWorth) => {
+  const value = Number(netWorth || 0);
+  if (value <= 0) return null;
+  const fiveYearPct = value < 1000000 ? 0.10 : value <= 5000000 ? 0.25 : value <= 10000000 ? 0.35 : 0.40;
+  return { annualLimit: value * fiveYearPct / 5, fiveYearPct };
+};
+const incomePremiumLimit = (grossIncome) => {
+  const value = Number(grossIncome || 0);
+  if (value <= 0) return null;
+  if (value > 2000000) return { annualLimit: null, individualConsideration: true };
+  const annualPct = value <= 50000 ? 0.10 : value <= 100000 ? 0.15 : value <= 250000 ? 0.20 : 0.30;
+  return { annualLimit: value * annualPct, annualPct, individualConsideration: false };
+};
+const getLifeNeedsBusinessRows = (li = {}) => ensureRows(li.businessAssets?.items, () => makeBusinessAssetRow(li.businessAssets || {}));
+const calculateLifeNeeds = (li = {}) => {
+  const num = value => Number(value || 0);
+  const fixedAssets = li.fixedAssets || {};
+  const liquidAssets = li.liquidAssets || {};
+  const foreignAssets = li.foreignAssets || {};
+  const investmentProperties = ensureRows(fixedAssets.investmentProperties, makeInvestmentPropertyRow);
+  const otherLiquidItems = ensureRows(liquidAssets.otherItems, makeOtherLiquidRow);
+  const businessRows = getLifeNeedsBusinessRows(li);
+  const fixedMarketValue = num(fixedAssets.principalMV) + investmentProperties.reduce((sum, row) => sum + num(row.marketValue), 0);
+  const fixedLoans = num(fixedAssets.principalLoan) + investmentProperties.reduce((sum, row) => sum + num(row.loan), 0);
+  const liquidMarketValue = num(liquidAssets.regMV) + num(liquidAssets.nonRegMV) + num(liquidAssets.bankMV) + otherLiquidItems.reduce((sum, row) => sum + num(row.marketValue), 0);
+  const liquidLoans = num(liquidAssets.regLoan) + num(liquidAssets.nonRegLoan) + num(liquidAssets.bankLoan) + otherLiquidItems.reduce((sum, row) => sum + num(row.loan), 0);
+  const businessRevenue = businessRows.reduce((sum, row) => sum + num(row.revenue), 0);
+  const businessNetIncome = businessRows.reduce((sum, row) => sum + num(row.netIncome), 0);
+  const businessFMV = businessRows.reduce((sum, row) => sum + num(row.fmv), 0);
+  const fixedNet = fixedMarketValue - fixedLoans;
+  const liquidNet = liquidMarketValue - liquidLoans;
+  const foreignNet = num(foreignAssets.withProofValue) + num(foreignAssets.withoutProofValue);
+  const totalNetWorth = fixedNet + liquidNet + businessFMV + foreignNet;
+  const templateType = li.templateType || "blank";
+  const eligibleIncome = num(li.earnedIncome) + (templateType === "businessOwner" ? businessNetIncome : 0);
+  const grossAnnualIncome = num(li.earnedIncome) + num(li.unearnedIncome) + (templateType === "businessOwner" ? businessNetIncome : 0);
+  const guideline = standardLifeFinancialGuideline(li.age);
+  const isChild = templateType === "child";
+  const ciMultiple = num(li.ciIncomeMultiple);
+  const lifeMultiple = num(li.lifeIncomeMultiple);
+  const ciIncomeNeed = isChild || !guideline.valid
+    ? eligibleIncome * ciMultiple
+    : Math.max(guideline.ciFloor, eligibleIncome * ciMultiple);
+  const lifeIncomeNeed = isChild || !guideline.valid
+    ? eligibleIncome * lifeMultiple
+    : Math.max(guideline.lifeFloor, eligibleIncome * lifeMultiple);
+  const growthRate = num(li.capGainsGrowthRate) / 100;
+  const years = Math.max(0, num(li.capGainsYears));
+  const marginalRate = num(li.capGainsMarginalTaxRate || 50) / 100;
+  const inclusionRate = num(li.capGainsInclusionRate || 50) / 100;
+  const projectedNetWorth = totalNetWorth > 0 && years > 0 ? totalNetWorth * Math.pow(1 + growthRate, years) : totalNetWorth;
+  const capitalGainsNeed = Math.round(Math.max(0, projectedNetWorth - num(li.acbNetWorth)) * marginalRate * inclusionRate);
+  const maxCI = Math.round(ciIncomeNeed + num(li.ciMortgage));
+  const maxLife = Math.round(lifeIncomeNeed + num(li.lifeMortgage) + capitalGainsNeed);
+  const netWorthLimit = netWorthPremiumLimit(totalNetWorth);
+  const incomeLimit = incomePremiumLimit(grossAnnualIncome);
+  const numericPremiumLimits = [netWorthLimit?.annualLimit, incomeLimit?.annualLimit].filter(value => Number.isFinite(value) && value >= 0);
+  const suggestedAnnualPremium = numericPremiumLimits.length ? Math.round(Math.min(...numericPremiumLimits)) : null;
+  return {
+    investmentProperties, otherLiquidItems, businessRows,
+    fixedMarketValue, fixedLoans, fixedNet, liquidMarketValue, liquidLoans, liquidNet,
+    businessRevenue, businessNetIncome, businessFMV, foreignNet, totalNetWorth,
+    eligibleIncome, grossAnnualIncome, guideline, ciIncomeNeed, lifeIncomeNeed, capitalGainsNeed,
+    maxCI, maxLife, netWorthLimit, incomeLimit, suggestedAnnualPremium,
+  };
+};
 const makeIncomeOtherRow = (row = {}) => ({
   id: row.id || makeRowId(),
   label: row.label || row.name || "Other",
@@ -875,6 +997,17 @@ function normalizeFormData(formData) {
 
   const li = fd.lifeInsurance?.needsAnalysis;
   if (li) {
+    li.templateType = li.templateType || "blank";
+    li.dependants = li.dependants || "";
+    li.needs = {
+      finalExpenses: !!li.needs?.finalExpenses,
+      incomeReplacement: !!li.needs?.incomeReplacement,
+      mortgage: !!li.needs?.mortgage,
+      other: !!li.needs?.other,
+      otherText: li.needs?.otherText || "",
+    };
+    li.guideline = makeLifeNeedsGuideline(li.guideline, li);
+    li.child = makeLifeNeedsChild(li.child);
     li.fixedAssets = li.fixedAssets || {};
     const legacyInvestRows = (li.fixedAssets.investMV || li.fixedAssets.investLoan)
       ? [makeInvestmentPropertyRow({ marketValue: li.fixedAssets.investMV, loan: li.fixedAssets.investLoan })]
@@ -886,6 +1019,10 @@ function normalizeFormData(formData) {
       ? [makeOtherLiquidRow({ marketValue: li.liquidAssets.otherMV, loan: li.liquidAssets.otherLoan })]
       : null;
     li.liquidAssets.otherItems = ensureRows(li.liquidAssets.otherItems || legacyLiquidRows, makeOtherLiquidRow);
+    li.businessAssets = li.businessAssets || {};
+    li.businessAssets.items = ensureRows(li.businessAssets.items || [makeBusinessAssetRow(li.businessAssets)], makeBusinessAssetRow);
+    li.capGainsMarginalTaxRate = li.capGainsMarginalTaxRate ?? "50";
+    li.capGainsInclusionRate = li.capGainsInclusionRate ?? "50";
     if (shouldReplaceAdvisorValue(li.advisorName)) li.advisorName = profile.advisorName;
   }
   applySmartNameAutoFillMutable(fd);
@@ -1083,16 +1220,20 @@ const initialFormData = {
       attachment: makeReasonWhyAttachment(),
     },
     needsAnalysis: {
+      templateType: "blank",
       clientName: "", occupation: "", age: "", industry: "",
-      earnedIncome: "", unearnedIncome: "", spouseIncome: "",
+      dependants: "", earnedIncome: "", unearnedIncome: "", spouseIncome: "",
+      needs: { finalExpenses: false, incomeReplacement: false, mortgage: false, other: false, otherText: "" },
+      guideline: { ciAutoValue: "", lifeAutoValue: "", ciManualOverride: false, lifeManualOverride: false },
+      child: makeLifeNeedsChild(),
       fixedAssets: { principalMV: "", principalLoan: "", investMV: "", investLoan: "", investmentProperties: [makeInvestmentPropertyRow()] },
       liquidAssets: { regMV:"", regLoan:"", nonRegMV:"", nonRegLoan:"", bankMV:"", bankLoan:"", otherMV:"", otherLoan:"", otherItems: [makeOtherLiquidRow()] },
-      businessAssets: { revenue:"", netIncome:"", fmv:"" },
+      businessAssets: { revenue:"", netIncome:"", fmv:"", items: [makeBusinessAssetRow()] },
       foreignAssets: { withProofFMV:"", withProofValue:"", withoutProofFMV:"", withoutProofValue:"" },
       acbNetWorth: "",
       ciIncomeMultiple: "", ciMortgage: "",
       lifeIncomeMultiple: "", lifeMortgage: "",
-      capGainsGrowthRate: "", capGainsYears: "",
+      capGainsGrowthRate: "", capGainsYears: "", capGainsMarginalTaxRate: "50", capGainsInclusionRate: "50",
       inForceCI: "", inForceLife: "",
       newCoverageCI: "", newCoverageLife: "",
       annualPremium: "",
@@ -2349,8 +2490,12 @@ const LifeInsuranceNeedsAnalysisForm = ({ data, update, markManualNamePath = () 
   const d = data.lifeInsurance.needsAnalysis;
   const set = (k,v) => update("lifeInsurance", { needsAnalysis: { ...d, [k]: v } });
   const setObj = (parent, k, v) => set(parent, { ...d[parent], [k]: v });
-  const investmentProperties = ensureRows(d.fixedAssets.investmentProperties, makeInvestmentPropertyRow);
-  const otherLiquidItems = ensureRows(d.liquidAssets.otherItems, makeOtherLiquidRow);
+  const calc = calculateLifeNeeds(d);
+  const investmentProperties = calc.investmentProperties;
+  const otherLiquidItems = calc.otherLiquidItems;
+  const businessRows = calc.businessRows;
+  const isChild = d.templateType === "child";
+  const isBusinessOwner = d.templateType === "businessOwner";
   const updateInvestmentProperty = (i, k, v) => {
     const rows = investmentProperties.map((row, idx) => idx === i ? { ...row, [k]: v } : row);
     setObj("fixedAssets", "investmentProperties", rows);
@@ -2363,56 +2508,146 @@ const LifeInsuranceNeedsAnalysisForm = ({ data, update, markManualNamePath = () 
   const addOtherLiquid = () => setObj("liquidAssets", "otherItems", [...otherLiquidItems, makeOtherLiquidRow()]);
   const removeInvestmentProperty = (i) => setObj("fixedAssets", "investmentProperties", investmentProperties.length > 1 ? investmentProperties.filter((_, idx) => idx !== i) : investmentProperties);
   const removeOtherLiquid = (i) => setObj("liquidAssets", "otherItems", otherLiquidItems.length > 1 ? otherLiquidItems.filter((_, idx) => idx !== i) : otherLiquidItems);
+  const updateBusinessAsset = (i, k, v) => {
+    const rows = businessRows.map((row, idx) => idx === i ? { ...row, [k]: v } : row);
+    set("businessAssets", { ...d.businessAssets, items: rows });
+  };
+  const addBusinessAsset = () => set("businessAssets", { ...d.businessAssets, items: [...businessRows, makeBusinessAssetRow()] });
+  const removeBusinessAsset = (i) => set("businessAssets", { ...d.businessAssets, items: businessRows.length > 1 ? businessRows.filter((_, idx) => idx !== i) : businessRows });
+  const setNeed = (key, value) => set("needs", { ...d.needs, [key]: value });
+  const setChild = (key, value) => set("child", { ...d.child, [key]: value });
+  const setMultiple = (kind, value) => {
+    const key = kind === "ci" ? "ciIncomeMultiple" : "lifeIncomeMultiple";
+    const manualKey = kind === "ci" ? "ciManualOverride" : "lifeManualOverride";
+    update("lifeInsurance", {
+      needsAnalysis: {
+        ...d,
+        [key]: value,
+        guideline: { ...d.guideline, [manualKey]: true },
+      },
+    });
+  };
+  const useGuidelineRecommendation = () => {
+    if (isChild || !calc.guideline.valid) return;
+    const ciValue = String(calc.guideline.ciMultiple);
+    const lifeValue = calc.guideline.lifeMultiple == null ? "" : String(calc.guideline.lifeMultiple);
+    update("lifeInsurance", {
+      needsAnalysis: {
+        ...d,
+        ciIncomeMultiple: ciValue,
+        lifeIncomeMultiple: lifeValue,
+        guideline: {
+          ...d.guideline,
+          ciAutoValue: ciValue,
+          lifeAutoValue: lifeValue,
+          ciManualOverride: false,
+          lifeManualOverride: false,
+        },
+      },
+    });
+  };
+
+  useEffect(() => {
+    const guidelineMeta = makeLifeNeedsGuideline(d.guideline, d);
+    if (isChild || !calc.guideline.valid) {
+      const nextCI = guidelineMeta.ciManualOverride ? d.ciIncomeMultiple : "";
+      const nextLife = guidelineMeta.lifeManualOverride ? d.lifeIncomeMultiple : "";
+      if (nextCI === d.ciIncomeMultiple && nextLife === d.lifeIncomeMultiple && !guidelineMeta.ciAutoValue && !guidelineMeta.lifeAutoValue) return;
+      update("lifeInsurance", {
+        needsAnalysis: {
+          ...d,
+          ciIncomeMultiple: nextCI,
+          lifeIncomeMultiple: nextLife,
+          guideline: { ...guidelineMeta, ciAutoValue: "", lifeAutoValue: "" },
+        },
+      });
+      return;
+    }
+    const ciValue = String(calc.guideline.ciMultiple);
+    const lifeValue = calc.guideline.lifeMultiple == null ? "" : String(calc.guideline.lifeMultiple);
+    const nextCI = guidelineMeta.ciManualOverride ? d.ciIncomeMultiple : ciValue;
+    const nextLife = guidelineMeta.lifeManualOverride ? d.lifeIncomeMultiple : lifeValue;
+    if (
+      nextCI === d.ciIncomeMultiple && nextLife === d.lifeIncomeMultiple &&
+      guidelineMeta.ciAutoValue === ciValue && guidelineMeta.lifeAutoValue === lifeValue
+    ) return;
+    update("lifeInsurance", {
+      needsAnalysis: {
+        ...d,
+        ciIncomeMultiple: nextCI,
+        lifeIncomeMultiple: nextLife,
+        guideline: { ...guidelineMeta, ciAutoValue: ciValue, lifeAutoValue: lifeValue },
+      },
+    });
+  }, [d.age, d.templateType]);
 
   const num = (x) => Number(x || 0);
-  const investmentPropertiesMV = investmentProperties.reduce((s,r) => s + num(r.marketValue), 0);
-  const investmentPropertiesLoan = investmentProperties.reduce((s,r) => s + num(r.loan), 0);
-  const fixedTotalMV = num(d.fixedAssets.principalMV) + investmentPropertiesMV;
-  const fixedTotalLoan = num(d.fixedAssets.principalLoan) + investmentPropertiesLoan;
-  const fixedTotalNet = fixedTotalMV - fixedTotalLoan;
+  const fixedTotalMV = calc.fixedMarketValue;
+  const fixedTotalLoan = calc.fixedLoans;
+  const fixedTotalNet = calc.fixedNet;
   const principalNet = num(d.fixedAssets.principalMV) - num(d.fixedAssets.principalLoan);
 
   const liqRegNet = num(d.liquidAssets.regMV) - num(d.liquidAssets.regLoan);
   const liqNonRegNet = num(d.liquidAssets.nonRegMV) - num(d.liquidAssets.nonRegLoan);
   const liqBankNet = num(d.liquidAssets.bankMV) - num(d.liquidAssets.bankLoan);
-  const otherLiquidMV = otherLiquidItems.reduce((s,r) => s + num(r.marketValue), 0);
-  const otherLiquidLoan = otherLiquidItems.reduce((s,r) => s + num(r.loan), 0);
-  const liqTotalMV = num(d.liquidAssets.regMV) + num(d.liquidAssets.nonRegMV) + num(d.liquidAssets.bankMV) + otherLiquidMV;
-  const liqTotalLoan = num(d.liquidAssets.regLoan) + num(d.liquidAssets.nonRegLoan) + num(d.liquidAssets.bankLoan) + otherLiquidLoan;
-  const liqTotalNet = liqTotalMV - liqTotalLoan;
-
-  const businessNet = num(d.businessAssets.fmv);
+  const liqTotalMV = calc.liquidMarketValue;
+  const liqTotalLoan = calc.liquidLoans;
+  const liqTotalNet = calc.liquidNet;
   const foreignWith = num(d.foreignAssets.withProofValue);
   const foreignWithout = num(d.foreignAssets.withoutProofValue);
-  const totalNetWorth = fixedTotalNet + liqTotalNet + businessNet + foreignWith + foreignWithout;
-
-  const earned = num(d.earnedIncome);
-  const ciIncome = earned * num(d.ciIncomeMultiple);
-  const lifeIncome = earned * num(d.lifeIncomeMultiple);
-  const ciMortgage = num(d.ciMortgage);
-  const lifeMortgage = num(d.lifeMortgage);
-  const maxCI = ciIncome + ciMortgage;
-  const maxLife = lifeIncome + lifeMortgage;
+  const totalNetWorth = calc.totalNetWorth;
+  const maxCI = calc.maxCI;
+  const maxLife = calc.maxLife;
 
   return (
     <div className="space-y-5">
       <h2 className="text-2xl font-bold text-navy text-center">Insurance Needs Analysis</h2>
 
+      <div className="border border-[#D8DCE3] bg-white p-4 rounded">
+        <Field label="Needs Analysis Template">
+          <Select value={d.templateType || "blank"} onChange={v=>set("templateType",v)} options={LIFE_NEEDS_TEMPLATE_OPTIONS}/>
+        </Field>
+        <div className="text-xs text-gray-600">
+          {isChild
+            ? "Child uses a dedicated family and child coverage analysis. Income multiples remain available for manual advisor input and are not age-generated."
+            : "Standard Financial Underwriting Guideline is applied from the client's age. Suggested multiples remain editable."}
+        </div>
+      </div>
+
       <table className="kyc-table">
         <tbody>
           <tr>
-            <th>Client's Name<span className="text-red-700 font-semibold"> *</span></th><td><TextInput value={d.clientName} onChange={v=>{ markManualNamePath("lifeInsurance.needsAnalysis.clientName"); set("clientName",v); }}/></td>
+            <th>{isChild ? "Policy Owner Name" : "Client's Name"}<span className="text-red-700 font-semibold"> *</span></th><td><TextInput value={d.clientName} onChange={v=>{ markManualNamePath("lifeInsurance.needsAnalysis.clientName"); set("clientName",v); }}/></td>
             <th>Occupation</th><td><TextInput value={d.occupation} onChange={v=>set("occupation",v)}/></td>
           </tr>
           <tr>
             <th>Age</th><td><TextInput type="number" value={d.age} onChange={v=>set("age",v)}/></td>
             <th>Industry</th><td><TextInput value={d.industry} onChange={v=>set("industry",v)}/></td>
           </tr>
-          <tr><td colSpan="3">Earned income, including salary, commission &amp; bonus (if 100% biz owner, add bf tax profit)</td><td><TextInput type="number" value={d.earnedIncome} onChange={v=>set("earnedIncome",v)}/></td></tr>
+          <tr>
+            <th>Dependants</th><td><TextInput type="number" value={d.dependants} onChange={v=>set("dependants",v)}/></td>
+            <th>Template</th><td className="font-semibold text-navy">{lifeNeedsTemplateLabel(d.templateType)}</td>
+          </tr>
+          <tr><td colSpan="3">{isBusinessOwner ? "Personal earned income, including salary, commission & bonus (business net income is added automatically below)" : "Earned income, including salary, commission & bonus"}</td><td><TextInput type="number" value={d.earnedIncome} onChange={v=>set("earnedIncome",v)}/></td></tr>
           <tr><td colSpan="3">Unearned income, including Pension, investment, rental income</td><td><TextInput type="number" value={d.unearnedIncome} onChange={v=>set("unearnedIncome",v)}/></td></tr>
           <tr><td colSpan="3">Spouse income</td><td><TextInput type="number" value={d.spouseIncome} onChange={v=>set("spouseIncome",v)}/></td></tr>
         </tbody>
       </table>
+
+      {!isChild && (
+        <div className="border border-gray-200 bg-gray-50 p-3 rounded">
+          <div className="font-semibold text-navy mb-2">Needs</div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <Checkbox checked={!!d.needs?.finalExpenses} onChange={v=>setNeed("finalExpenses",v)} label="Final Expenses"/>
+            <Checkbox checked={!!d.needs?.incomeReplacement} onChange={v=>setNeed("incomeReplacement",v)} label="Income Replacement"/>
+            <Checkbox checked={!!d.needs?.mortgage} onChange={v=>setNeed("mortgage",v)} label="Mortgage"/>
+            <div>
+              <Checkbox checked={!!d.needs?.other} onChange={v=>setNeed("other",v)} label="Other"/>
+              {d.needs?.other && <TextInput value={d.needs.otherText} onChange={v=>setNeed("otherText",v)} placeholder="Describe other need"/>}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="section-header-light">Canadian Fixed Assets</div>
       <table className="kyc-table">
@@ -2468,56 +2703,115 @@ const LifeInsuranceNeedsAnalysisForm = ({ data, update, markManualNamePath = () 
 
       <div className="section-header-light">Business Assets</div>
       <table className="kyc-table">
-        <thead><tr><th>Asset</th><th>Annual Revenue</th><th>Annual net income</th><th>Business FMV</th></tr></thead>
+        <thead><tr><th>Asset</th><th>Annual Revenue</th><th>Annual net income</th><th>Business FMV</th>{isBusinessOwner && <th></th>}</tr></thead>
         <tbody>
-          <tr><td>Business values</td>
-            <td><TextInput type="number" value={d.businessAssets.revenue} onChange={v=>setObj("businessAssets","revenue",v)}/></td>
-            <td><TextInput type="number" value={d.businessAssets.netIncome} onChange={v=>setObj("businessAssets","netIncome",v)}/></td>
-            <td><TextInput type="number" value={d.businessAssets.fmv} onChange={v=>setObj("businessAssets","fmv",v)}/></td></tr>
+          {businessRows.map((row, i) => (
+            <tr key={row.id || i}>
+              <td><TextInput value={row.name} onChange={v=>updateBusinessAsset(i,"name",v)} placeholder="Business"/></td>
+              <td><TextInput type="number" value={row.revenue} onChange={v=>updateBusinessAsset(i,"revenue",v)}/></td>
+              <td><TextInput type="number" value={row.netIncome} onChange={v=>updateBusinessAsset(i,"netIncome",v)}/></td>
+              <td><TextInput type="number" value={row.fmv} onChange={v=>updateBusinessAsset(i,"fmv",v)}/></td>
+              {isBusinessOwner && <td><button type="button" className="px-2 py-1 border rounded text-xs text-gray-600" onClick={()=>removeBusinessAsset(i)} disabled={businessRows.length <= 1}>Remove</button></td>}
+            </tr>
+          ))}
+          {isBusinessOwner && (
+            <tr><th>Total Business</th><th className="text-right">{calc.businessRevenue.toLocaleString()}</th><th className="text-right">{calc.businessNetIncome.toLocaleString()}</th><th className="text-right">{calc.businessFMV.toLocaleString()}</th><th></th></tr>
+          )}
         </tbody>
       </table>
+      {isBusinessOwner && <button type="button" onClick={addBusinessAsset} className="px-3 py-2 border border-[#C9A961] text-[#0B1E3F] rounded text-sm font-medium">+ Add Business</button>}
 
-      <div className="section-header-light">Foreign Assets</div>
-      <table className="kyc-table">
-        <thead><tr><th>Asset</th><th>FMV</th><th>Recognized Value</th><th>Net Worth</th></tr></thead>
-        <tbody>
-          <tr><td>Foreign Assets with proof (T1135, bank stmnt, etc.)</td>
-            <td><TextInput type="number" value={d.foreignAssets.withProofFMV} onChange={v=>setObj("foreignAssets","withProofFMV",v)}/></td>
-            <td><TextInput type="number" value={d.foreignAssets.withProofValue} onChange={v=>setObj("foreignAssets","withProofValue",v)}/></td>
-            <td className="text-right font-semibold">{foreignWith.toLocaleString()}</td></tr>
-          <tr><td>Foreign Assets without proof</td>
-            <td><TextInput type="number" value={d.foreignAssets.withoutProofFMV} onChange={v=>setObj("foreignAssets","withoutProofFMV",v)}/></td>
-            <td><TextInput type="number" value={d.foreignAssets.withoutProofValue} onChange={v=>setObj("foreignAssets","withoutProofValue",v)}/></td>
-            <td className="text-right font-semibold">{foreignWithout.toLocaleString()}</td></tr>
-        </tbody>
-      </table>
+      {!isChild && (
+        <>
+          <div className="section-header-light">Foreign Assets</div>
+          <table className="kyc-table">
+            <thead><tr><th>Asset</th><th>FMV</th><th>Recognized Value</th><th>Net Worth</th></tr></thead>
+            <tbody>
+              <tr><td>Foreign Assets with proof (T1135, bank stmnt, etc.)</td>
+                <td><TextInput type="number" value={d.foreignAssets.withProofFMV} onChange={v=>setObj("foreignAssets","withProofFMV",v)}/></td>
+                <td><TextInput type="number" value={d.foreignAssets.withProofValue} onChange={v=>setObj("foreignAssets","withProofValue",v)}/></td>
+                <td className="text-right font-semibold">{foreignWith.toLocaleString()}</td></tr>
+              <tr><td>Foreign Assets without proof</td>
+                <td><TextInput type="number" value={d.foreignAssets.withoutProofFMV} onChange={v=>setObj("foreignAssets","withoutProofFMV",v)}/></td>
+                <td><TextInput type="number" value={d.foreignAssets.withoutProofValue} onChange={v=>setObj("foreignAssets","withoutProofValue",v)}/></td>
+                <td className="text-right font-semibold">{foreignWithout.toLocaleString()}</td></tr>
+            </tbody>
+          </table>
+        </>
+      )}
 
       <div className="bg-yellow-50 border border-yellow-300 rounded p-3 flex flex-col md:flex-row md:justify-between md:items-center gap-2">
-        <div className="font-semibold text-navy">Total Net Worth in CAD:</div>
+        <div className="font-semibold text-navy">{isChild ? "Total Canadian Net Worth:" : "Total Net Worth in CAD:"}</div>
         <div className="text-2xl font-bold text-gold">${totalNetWorth.toLocaleString()}</div>
         <div className="flex items-center gap-2"><label className="text-sm text-navy">ACB of Net worth:</label>
           <TextInput type="number" value={d.acbNetWorth} onChange={v=>set("acbNetWorth",v)}/></div>
       </div>
 
-      <div className="section-header">INSURANCE NEEDS ANALYSIS</div>
+      {isChild && (
+        <>
+          <div className="section-header">CHILD &amp; FAMILY COVERAGE INFORMATION</div>
+          <table className="kyc-table">
+            <tbody>
+              <tr><th>Life Insured</th><td><TextInput value={d.child.lifeInsuredName} onChange={v=>setChild("lifeInsuredName",v)}/></td><th>Gender</th><td><Select value={d.child.gender} onChange={v=>setChild("gender",v)} options={[{value:"",label:"Select"},{value:"Male",label:"Male"},{value:"Female",label:"Female"},{value:"Other",label:"Other"}]}/></td><th>Age</th><td><TextInput type="number" value={d.child.age} onChange={v=>setChild("age",v)}/></td></tr>
+            </tbody>
+          </table>
+          <table className="kyc-table">
+            <thead><tr><th>Parents' Coverage</th><th>Father</th><th>Mother</th></tr></thead>
+            <tbody>
+              <tr><td>Life insurance in-force</td><td><TextInput type="number" value={d.child.parentLifeInForceFather} onChange={v=>setChild("parentLifeInForceFather",v)}/></td><td><TextInput type="number" value={d.child.parentLifeInForceMother} onChange={v=>setChild("parentLifeInForceMother",v)}/></td></tr>
+              <tr><td>Life insurance pending</td><td><TextInput type="number" value={d.child.parentLifePendingFather} onChange={v=>setChild("parentLifePendingFather",v)}/></td><td><TextInput type="number" value={d.child.parentLifePendingMother} onChange={v=>setChild("parentLifePendingMother",v)}/></td></tr>
+              <tr><td>Critical illness insurance in-force</td><td><TextInput type="number" value={d.child.parentCIInForceFather} onChange={v=>setChild("parentCIInForceFather",v)}/></td><td><TextInput type="number" value={d.child.parentCIInForceMother} onChange={v=>setChild("parentCIInForceMother",v)}/></td></tr>
+              <tr><td>Critical illness insurance pending</td><td><TextInput type="number" value={d.child.parentCIPendingFather} onChange={v=>setChild("parentCIPendingFather",v)}/></td><td><TextInput type="number" value={d.child.parentCIPendingMother} onChange={v=>setChild("parentCIPendingMother",v)}/></td></tr>
+            </tbody>
+          </table>
+          <div className="border border-gray-200 bg-gray-50 p-3 rounded">
+            <div className="font-semibold text-navy mb-2">Purpose of Insurance</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Checkbox checked={d.child.purposeHeadStart} onChange={v=>setChild("purposeHeadStart",v)} label="Head Start"/>
+              <Checkbox checked={d.child.purposeTaxSheltered} onChange={v=>setChild("purposeTaxSheltered",v)} label="Tax-sheltered Saving"/>
+            </div>
+          </div>
+        </>
+      )}
+
+      <div className="section-header">{isChild ? "CHILD INSURANCE NEEDS ANALYSIS" : "INSURANCE NEEDS ANALYSIS"}</div>
+      <div className={`border rounded p-3 ${calc.guideline.valid && !isChild ? "border-blue-200 bg-blue-50" : "border-amber-200 bg-amber-50"}`}>
+        {isChild ? (
+          <div className="text-sm text-amber-900">Child template: CI and Life income multiples are manual reference fields. No age-based adult guideline is applied.</div>
+        ) : calc.guideline.valid ? (
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div className="text-sm text-navy">
+              <span className="font-semibold">Standard guideline for age {d.age}:</span>{" "}
+              CI {calc.guideline.ciMultiple}x (minimum ${calc.guideline.ciFloor.toLocaleString()});{" "}
+              {calc.guideline.lifeIndividualConsideration
+                ? `Life minimum $${calc.guideline.lifeFloor.toLocaleString()} - higher amounts require Individual Consideration`
+                : `Life ${calc.guideline.lifeMultiple}x (minimum $${calc.guideline.lifeFloor.toLocaleString()})`}.
+            </div>
+            <button type="button" onClick={useGuidelineRecommendation} className="px-3 py-2 border border-navy text-navy rounded text-xs font-semibold whitespace-nowrap">Use guideline recommendation</button>
+          </div>
+        ) : (
+          <div className="text-sm text-amber-900">{calc.guideline.message}</div>
+        )}
+      </div>
       <table className="kyc-table">
         <thead><tr><th>Items</th><th>Parameter</th><th>Max. CI Coverage</th><th>Max. Life Coverage</th></tr></thead>
         <tbody>
-          <tr><td className="text-red-700 font-semibold">Critical illness Ins to replace income</td>
-            <td><div className="flex items-center gap-1"><TextInput type="number" value={d.ciIncomeMultiple} onChange={v=>set("ciIncomeMultiple",v)}/> <span className="text-xs"> x earned income</span></div></td>
-            <td className="text-right">{(earned * num(d.ciIncomeMultiple)).toLocaleString()}</td><td></td></tr>
+          <tr><td className="text-red-700 font-semibold">{isChild ? "Optional CI income multiple (manual)" : "Critical illness Ins to replace income"}</td>
+            <td><div className="flex items-center gap-1"><TextInput type="number" value={d.ciIncomeMultiple} onChange={v=>setMultiple("ci",v)}/> <span className="text-xs"> x eligible earned income</span></div></td>
+            <td className="text-right">{calc.ciIncomeNeed.toLocaleString()}</td><td></td></tr>
           <tr><td className="text-red-700 font-semibold">Critical illness Ins for Mortgage protection</td>
             <td><div className="flex items-center gap-1"><span className="text-xs">Mortgage:</span><TextInput type="number" value={d.ciMortgage} onChange={v=>set("ciMortgage",v)}/></div></td>
             <td className="text-right">{num(d.ciMortgage).toLocaleString()}</td><td></td></tr>
-          <tr><td className="font-semibold">Life Ins to replace income</td>
-            <td><div className="flex items-center gap-1"><TextInput type="number" value={d.lifeIncomeMultiple} onChange={v=>set("lifeIncomeMultiple",v)}/> <span className="text-xs"> x earned income</span></div></td>
-            <td></td><td className="text-right">{(earned * num(d.lifeIncomeMultiple)).toLocaleString()}</td></tr>
+          <tr><td className="font-semibold">{isChild ? "Optional Life income multiple (manual)" : "Life Ins to replace income"}</td>
+            <td><div className="flex items-center gap-1"><TextInput type="number" value={d.lifeIncomeMultiple} onChange={v=>setMultiple("life",v)}/> <span className="text-xs"> x eligible earned income</span></div></td>
+            <td></td><td className="text-right">{calc.lifeIncomeNeed.toLocaleString()}</td></tr>
           <tr><td className="font-semibold">Life Ins for Mortgage protection</td>
             <td><div className="flex items-center gap-1"><span className="text-xs">Mortgage:</span><TextInput type="number" value={d.lifeMortgage} onChange={v=>set("lifeMortgage",v)}/></div></td>
             <td></td><td className="text-right">{num(d.lifeMortgage).toLocaleString()}</td></tr>
-          <tr><td className="font-semibold">Life Ins for anticipated capital gains taxes</td>
-            <td><div className="flex items-center gap-1"><span className="text-xs">Growth</span><TextInput type="number" value={d.capGainsGrowthRate} onChange={v=>set("capGainsGrowthRate",v)}/><span className="text-xs">% for</span><TextInput type="number" value={d.capGainsYears} onChange={v=>set("capGainsYears",v)}/><span className="text-xs">Yrs @50%</span></div></td>
-            <td></td><td></td></tr>
+          {!isChild && <tr><td className="font-semibold">Life Ins for anticipated capital gains taxes</td>
+            <td><div className="grid grid-cols-2 gap-1 text-xs"><label>Growth %<TextInput type="number" value={d.capGainsGrowthRate} onChange={v=>set("capGainsGrowthRate",v)}/></label><label>Years<TextInput type="number" value={d.capGainsYears} onChange={v=>set("capGainsYears",v)}/></label><label>Marginal tax %<TextInput type="number" value={d.capGainsMarginalTaxRate} onChange={v=>set("capGainsMarginalTaxRate",v)}/></label><label>Inclusion %<TextInput type="number" value={d.capGainsInclusionRate} onChange={v=>set("capGainsInclusionRate",v)}/></label></div></td>
+            <td></td><td className="text-right">{calc.capitalGainsNeed.toLocaleString()}</td></tr>}
+          {isBusinessOwner && <tr><td colSpan="2" className="text-xs text-gray-600">Eligible earned income includes client earned income plus total annual business net income.</td><td></td><td className="text-right font-semibold">${calc.eligibleIncome.toLocaleString()}</td></tr>}
           <tr><th colSpan="2">Maximum coverage</th><th className="text-right">{maxCI.toLocaleString()}</th><th className="text-right">{maxLife.toLocaleString()}</th></tr>
           <tr><th colSpan="2">In-force Coverage</th>
             <td><TextInput type="number" value={d.inForceCI} onChange={v=>set("inForceCI",v)}/></td>
@@ -2538,14 +2832,17 @@ const LifeInsuranceNeedsAnalysisForm = ({ data, update, markManualNamePath = () 
         </tbody>
       </table>
 
+      {isChild && (
+        <Field label="Recommendations / Notes">
+          <TextArea value={d.child.notes} onChange={v=>setChild("notes",v)} rows={5}/>
+        </Field>
+      )}
+
       <div className="bg-gray-50 border rounded p-3">
         <div className="font-semibold text-navy mb-2">Premium suitability</div>
         {(() => {
           const annualPremium = num(d.annualPremium);
           const fiveYrPremium = annualPremium * 5;
-          const totalIncomeAnn = earned + num(d.unearnedIncome) + num(d.spouseIncome);
-          const pct5OfNetWorth  = totalNetWorth > 0 ? (fiveYrPremium / totalNetWorth) * 100 : 0;
-          const pctAnnOfIncome = totalIncomeAnn > 0 ? (annualPremium / totalIncomeAnn) * 100 : 0;
           const fmt = (n) => "$" + Math.round(n).toLocaleString();
           return (
             <div className="space-y-2 text-sm">
@@ -2553,24 +2850,22 @@ const LifeInsuranceNeedsAnalysisForm = ({ data, update, markManualNamePath = () 
                 <label className="text-navy">Annual premium:</label>
                 <div style={{ width: 160 }}><TextInput type="number" value={d.annualPremium} onChange={v=>set("annualPremium",v)}/></div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-2">
                 <div className="p-2 bg-white border rounded">
                   <div className="text-xs uppercase text-gray-500 tracking-widest">5-Year Premium</div>
                   <div className="font-semibold text-navy text-lg">{fmt(fiveYrPremium)}</div>
                 </div>
                 <div className="p-2 bg-white border rounded">
-                  <div className="text-xs uppercase text-gray-500 tracking-widest">% of Net Worth</div>
-                  <div className={`font-semibold text-lg ${pct5OfNetWorth > 10 ? "text-amber-700" : "text-navy"}`}>{totalNetWorth > 0 ? pct5OfNetWorth.toFixed(2) + "%" : "—"}</div>
+                  <div className="text-xs uppercase text-gray-500 tracking-widest">Client Gross Annual Income</div>
+                  <div className="font-semibold text-navy text-lg">{fmt(calc.grossAnnualIncome)}</div>
                 </div>
                 <div className="p-2 bg-white border rounded">
-                  <div className="text-xs uppercase text-gray-500 tracking-widest">Total Annual Income</div>
-                  <div className="font-semibold text-navy text-lg">{fmt(totalIncomeAnn)}</div>
-                </div>
-                <div className="p-2 bg-white border rounded">
-                  <div className="text-xs uppercase text-gray-500 tracking-widest">% of Annual Income</div>
-                  <div className={`font-semibold text-lg ${pctAnnOfIncome > 10 ? "text-amber-700" : "text-navy"}`}>{totalIncomeAnn > 0 ? pctAnnOfIncome.toFixed(2) + "%" : "—"}</div>
+                  <div className="text-xs uppercase text-gray-500 tracking-widest">Suggested Maximum Annual Premium</div>
+                  <div className="font-semibold text-navy text-lg">{calc.suggestedAnnualPremium == null ? "—" : fmt(calc.suggestedAnnualPremium)}</div>
                 </div>
               </div>
+              {calc.incomeLimit?.individualConsideration && <div className="text-xs text-amber-800">Gross annual income exceeds $2,000,000. The income guideline requires Individual Consideration; any numeric maximum shown is limited by available net-worth guidance.</div>}
+              <div className="text-xs text-gray-600">Guideline reference only. The suggested maximum does not replace carrier underwriting or suitability review.</div>
             </div>
           );
         })()}
@@ -2693,6 +2988,12 @@ const coverProductType = (data) => {
     const li = data.lifeInsurance?.needsAnalysis || {};
     const hasCI = Number(li.newCoverageCI || 0) > 0;
     const hasLife = Number(li.newCoverageLife || 0) > 0;
+    if (li.templateType === "child") {
+      if (hasCI && hasLife) return "Child Life / Critical Illness Insurance";
+      if (hasCI) return "Child Critical Illness Insurance";
+      if (hasLife) return "Child Life Insurance";
+      return "Child Insurance Needs Analysis";
+    }
     if (hasCI && hasLife) return "Life Insurance / Critical Illness Insurance";
     if (hasCI) return "Critical Illness Insurance";
     if (hasLife) return "Life Insurance";
@@ -5032,14 +5333,22 @@ const drawInsuranceQuestionnaireVector = (w, sf) => {
 };
 const drawLifeInsuranceVector = (w, li) => {
   const num = (x) => Number(x || 0);
-  const investmentProperties = ensureRows(li.fixedAssets.investmentProperties, makeInvestmentPropertyRow).filter(row => hasText(row.marketValue) || hasText(row.loan) || (hasText(row.name) && row.name.trim().toLowerCase() !== "investment property"));
-  const otherLiquidItems = ensureRows(li.liquidAssets.otherItems, makeOtherLiquidRow).filter(row => hasText(row.marketValue) || hasText(row.loan) || (hasText(row.name) && row.name.trim().toLowerCase() !== "other liquid asset"));
-  const fixedTotalNet = (num(li.fixedAssets.principalMV) + investmentProperties.reduce((s,r)=>s+num(r.marketValue),0)) - (num(li.fixedAssets.principalLoan) + investmentProperties.reduce((s,r)=>s+num(r.loan),0));
-  const liqTotalNet = (num(li.liquidAssets.regMV)+num(li.liquidAssets.nonRegMV)+num(li.liquidAssets.bankMV)+otherLiquidItems.reduce((s,r)=>s+num(r.marketValue),0)) - (num(li.liquidAssets.regLoan)+num(li.liquidAssets.nonRegLoan)+num(li.liquidAssets.bankLoan)+otherLiquidItems.reduce((s,r)=>s+num(r.loan),0));
-  const totalNetWorth = fixedTotalNet + liqTotalNet + num(li.businessAssets.fmv) + num(li.foreignAssets.withProofValue) + num(li.foreignAssets.withoutProofValue);
-  const earned = num(li.earnedIncome);
-  const maxCI = earned * num(li.ciIncomeMultiple) + num(li.ciMortgage);
-  const maxLife = earned * num(li.lifeIncomeMultiple) + num(li.lifeMortgage);
+  const calc = calculateLifeNeeds(li);
+  const investmentProperties = calc.investmentProperties.filter(row => hasText(row.marketValue) || hasText(row.loan) || (hasText(row.name) && row.name.trim().toLowerCase() !== "investment property"));
+  const otherLiquidItems = calc.otherLiquidItems.filter(row => hasText(row.marketValue) || hasText(row.loan) || (hasText(row.name) && row.name.trim().toLowerCase() !== "other liquid asset"));
+  const businessRows = calc.businessRows.filter(row => hasText(row.revenue) || hasText(row.netIncome) || hasText(row.fmv) || (hasText(row.name) && row.name.trim().toLowerCase() !== "business"));
+  const fixedTotalNet = calc.fixedNet;
+  const liqTotalNet = calc.liquidNet;
+  const totalNetWorth = calc.totalNetWorth;
+  const maxCI = calc.maxCI;
+  const maxLife = calc.maxLife;
+  const isChild = li.templateType === "child";
+  const needsText = [
+    li.needs?.finalExpenses && "Final Expenses",
+    li.needs?.incomeReplacement && "Income Replacement",
+    li.needs?.mortgage && "Mortgage",
+    li.needs?.other && (li.needs.otherText || "Other"),
+  ].filter(Boolean).join(", ") || " - ";
   const denseTable = { dense: true, micro: investmentProperties.length + otherLiquidItems.length > 4, noPageBreak: true };
   const secondPageTable = { ...denseTable, micro: true };
   const lifeSection = (title, fn) => {
@@ -5103,17 +5412,32 @@ const drawLifeInsuranceVector = (w, li) => {
     });
     w.y = y0 + 33.5;
   };
-  w.addPage(); w.header("Insurance Needs Analysis", "", "Life Insurance Needs Analysis - Page 1");
-  w.section("Client Information", () => w.fields([["Client's Name", li.clientName], ["Occupation", li.occupation], ["Age", li.age], ["Industry", li.industry], ["Earned Income", fmtMoney(li.earnedIncome)], ["Unearned Income", fmtMoney(li.unearnedIncome)], ["Spouse Income", fmtMoney(li.spouseIncome)]], 3, { dense: true }), 10, { compact: true });
+  const templateLabel = lifeNeedsTemplateLabel(li.templateType);
+  const headerTitle = isChild ? "Child Insurance Needs Analysis" : "Insurance Needs Analysis";
+  w.addPage(); w.header(headerTitle, templateLabel, "Life Insurance Needs Analysis - Page 1");
+  w.section(isChild ? "Policy Owner Information" : "Client Information", () => w.fields([[isChild ? "Policy Owner Name" : "Client's Name", li.clientName], ["Occupation", li.occupation], ["Age", li.age], ["Industry", li.industry], ["Dependants", li.dependants], ["Earned Income", fmtMoney(li.earnedIncome)], ["Unearned Income", fmtMoney(li.unearnedIncome)], ["Spouse Income", fmtMoney(li.spouseIncome)], ["Template", templateLabel]], 3, { dense: true }), 10, { compact: true });
+  if (!isChild) w.section("Needs", () => w.fields([["Identified needs", needsText]], 1, { dense: true }), 6, { compact: true });
   w.section("Canadian Fixed Assets", () => w.table(["Asset", "Market Value", "Mortgage & LOC", "Net Worth"], pdfRows([["Principal Residence", fmtMoney(li.fixedAssets.principalMV), fmtMoney(li.fixedAssets.principalLoan), fmtMoney(num(li.fixedAssets.principalMV)-num(li.fixedAssets.principalLoan))], ...investmentProperties.map(row => [row.name || "Investment Property", fmtMoney(row.marketValue), fmtMoney(row.loan), fmtMoney(num(row.marketValue)-num(row.loan))])]), null, denseTable), 12, { compact: true });
   w.section("Canadian Liquid Assets", () => w.table(["Asset", "Market Value", "Loan", "Net Worth"], pdfRows([["Registered plan (RRSP, TFSA, etc.)", fmtMoney(li.liquidAssets.regMV), fmtMoney(li.liquidAssets.regLoan), fmtMoney(num(li.liquidAssets.regMV)-num(li.liquidAssets.regLoan))], ["Non-registered investment", fmtMoney(li.liquidAssets.nonRegMV), fmtMoney(li.liquidAssets.nonRegLoan), fmtMoney(num(li.liquidAssets.nonRegMV)-num(li.liquidAssets.nonRegLoan))], ["Bank savings", fmtMoney(li.liquidAssets.bankMV), fmtMoney(li.liquidAssets.bankLoan), fmtMoney(num(li.liquidAssets.bankMV)-num(li.liquidAssets.bankLoan))], ...otherLiquidItems.map(row => [row.name || "Other Liquid Asset", fmtMoney(row.marketValue), fmtMoney(row.loan), fmtMoney(num(row.marketValue)-num(row.loan))])]), null, denseTable), 12, { compact: true });
-  w.section("Business Assets", () => w.table(["Asset", "Annual Revenue", "Annual Net Income", "Business FMV"], pdfRows([["Business values", fmtMoney(li.businessAssets.revenue), fmtMoney(li.businessAssets.netIncome), fmtMoney(li.businessAssets.fmv)]]), null, denseTable), 12, { compact: true });
+  w.section("Business Assets", () => w.table(["Asset", "Annual Revenue", "Annual Net Income", "Business FMV"], pdfRows((businessRows.length ? businessRows : [makeBusinessAssetRow()]).map(row => [row.name || "Business", fmtMoney(row.revenue), fmtMoney(row.netIncome), fmtMoney(row.fmv)]).concat(li.templateType === "businessOwner" ? [["Total Business", fmtMoney(calc.businessRevenue), fmtMoney(calc.businessNetIncome), fmtMoney(calc.businessFMV)]] : [])), null, denseTable), 12, { compact: true });
   w.finishPage();
-  w.addPage(); w.header("Insurance Needs Analysis", "Foreign Assets & Coverage", "Life Insurance Needs Analysis - Page 2");
+  w.addPage(); w.header(headerTitle, isChild ? "Family & Coverage" : "Foreign Assets & Coverage", "Life Insurance Needs Analysis - Page 2");
   w.y -= 10;
-  lifeSection("Foreign Assets", () => w.table(["Foreign Asset", "FMV", "Recognized Value", "Net Worth"], pdfRows([["With proof (T1135, bank stmnt, etc)", fmtMoney(li.foreignAssets.withProofFMV), fmtMoney(li.foreignAssets.withProofValue), fmtMoney(li.foreignAssets.withProofValue)], ["Without proof", fmtMoney(li.foreignAssets.withoutProofFMV), fmtMoney(li.foreignAssets.withoutProofValue), fmtMoney(li.foreignAssets.withoutProofValue)]]), null, secondPageTable));
-  lifeSection("Net Worth Summary", () => denseSummaryGrid([["Fixed Assets - Net", fmtMoney(fixedTotalNet)], ["Liquid Assets - Net", fmtMoney(liqTotalNet)], ["Business FMV", fmtMoney(li.businessAssets.fmv)], ["Foreign Assets", fmtMoney(num(li.foreignAssets.withProofValue)+num(li.foreignAssets.withoutProofValue))], ["Total Net Worth", fmtMoney(totalNetWorth)], ["ACB of Net Worth", fmtMoney(li.acbNetWorth)]], 3));
-  lifeSection("Coverage & Premium", () => w.table(["Item", "Critical Illness", "Life Insurance"], pdfRows([["Income replacement", `${li.ciIncomeMultiple || "0"} x income = ${fmtMoney(earned*num(li.ciIncomeMultiple))}`, `${li.lifeIncomeMultiple || "0"} x income = ${fmtMoney(earned*num(li.lifeIncomeMultiple))}`], ["Mortgage protection", fmtMoney(li.ciMortgage), fmtMoney(li.lifeMortgage)], ["Maximum coverage", fmtMoney(maxCI), fmtMoney(maxLife)], ["In-force coverage", fmtMoney(li.inForceCI), fmtMoney(li.inForceLife)], ["New coverage to be placed", fmtMoney(li.newCoverageCI), fmtMoney(li.newCoverageLife)], ["Annual premium / suitability", fmtMoney(li.annualPremium), "Reviewed"]]), [w.contentW * 0.34, w.contentW * 0.33, w.contentW * 0.33], secondPageTable));
+  if (isChild) {
+    const child = makeLifeNeedsChild(li.child);
+    lifeSection("Life Insured", () => w.fields([["Life Insured", child.lifeInsuredName], ["Gender", child.gender], ["Age", child.age]], 3, { dense: true }));
+    lifeSection("Parents' Insurance", () => w.table(["Coverage", "Father", "Mother"], pdfRows([["Life insurance in-force", fmtMoney(child.parentLifeInForceFather), fmtMoney(child.parentLifeInForceMother)], ["Life insurance pending", fmtMoney(child.parentLifePendingFather), fmtMoney(child.parentLifePendingMother)], ["Critical illness in-force", fmtMoney(child.parentCIInForceFather), fmtMoney(child.parentCIInForceMother)], ["Critical illness pending", fmtMoney(child.parentCIPendingFather), fmtMoney(child.parentCIPendingMother)]]), null, secondPageTable));
+    lifeSection("Child Coverage & Purpose", () => w.table(["Item", "Critical Illness", "Life Insurance"], pdfRows([["Optional manual income multiple", `${li.ciIncomeMultiple || "0"} x eligible income`, `${li.lifeIncomeMultiple || "0"} x eligible income`], ["Child's in-force coverage", fmtMoney(li.inForceCI), fmtMoney(li.inForceLife)], ["New coverage to be placed", fmtMoney(li.newCoverageCI), fmtMoney(li.newCoverageLife)], ["Purpose of insurance", child.purposeHeadStart ? "Head Start" : " - ", child.purposeTaxSheltered ? "Tax-sheltered Saving" : " - "]]), [w.contentW * 0.40, w.contentW * 0.30, w.contentW * 0.30], secondPageTable));
+    if (hasText(child.notes)) lifeSection("Recommendations / Notes", () => w.textBlock(child.notes, { size: 6.8, lineH: 3.3, gap: 0.5 }));
+  } else {
+    const guidelineLifeText = calc.guideline.lifeIndividualConsideration
+      ? `${fmtMoney(calc.guideline.lifeFloor)} minimum; Individual Consideration above`
+      : `${calc.guideline.lifeMultiple || " - "} x; minimum ${fmtMoney(calc.guideline.lifeFloor)}`;
+    lifeSection("Standard Financial Underwriting Guideline", () => w.fields([["Template", templateLabel], ["Client age", li.age], ["Eligible earned income", fmtMoney(calc.eligibleIncome)], ["CI guideline", calc.guideline.valid ? `${calc.guideline.ciMultiple} x; minimum ${fmtMoney(calc.guideline.ciFloor)}` : "Manual review"], ["Life guideline", calc.guideline.valid ? guidelineLifeText : "Manual review"], ["Applied multiples", `CI ${li.ciIncomeMultiple || " - "} x / Life ${li.lifeIncomeMultiple || " - "} x`]], 3, { dense: true }));
+    lifeSection("Foreign Assets", () => w.table(["Foreign Asset", "FMV", "Recognized Value", "Net Worth"], pdfRows([["With proof (T1135, bank stmnt, etc)", fmtMoney(li.foreignAssets.withProofFMV), fmtMoney(li.foreignAssets.withProofValue), fmtMoney(li.foreignAssets.withProofValue)], ["Without proof", fmtMoney(li.foreignAssets.withoutProofFMV), fmtMoney(li.foreignAssets.withoutProofValue), fmtMoney(li.foreignAssets.withoutProofValue)]]), null, secondPageTable));
+  }
+  lifeSection("Net Worth & Premium Summary", () => denseSummaryGrid([["Fixed Assets - Net", fmtMoney(fixedTotalNet)], ["Liquid Assets - Net", fmtMoney(liqTotalNet)], ["Business FMV", fmtMoney(calc.businessFMV)], [isChild ? "Total Canadian Net Worth" : "Total Net Worth", fmtMoney(totalNetWorth)], ["Client Gross Annual Income", fmtMoney(calc.grossAnnualIncome)], ["Suggested Max. Annual Premium", calc.suggestedAnnualPremium == null ? " - " : fmtMoney(calc.suggestedAnnualPremium)]], 3));
+  if (!isChild) lifeSection("Coverage & Premium", () => w.table(["Item", "Critical Illness", "Life Insurance"], pdfRows([["Income replacement", `${li.ciIncomeMultiple || "0"} x; need ${fmtMoney(calc.ciIncomeNeed)}`, `${li.lifeIncomeMultiple || "0"} x; need ${fmtMoney(calc.lifeIncomeNeed)}`], ["Mortgage protection", fmtMoney(li.ciMortgage), fmtMoney(li.lifeMortgage)], ["Anticipated capital gains taxes", " - ", fmtMoney(calc.capitalGainsNeed)], ["Maximum coverage", fmtMoney(maxCI), fmtMoney(maxLife)], ["In-force coverage", fmtMoney(li.inForceCI), fmtMoney(li.inForceLife)], ["New coverage to be placed", fmtMoney(li.newCoverageCI), fmtMoney(li.newCoverageLife)], ["Annual premium", fmtMoney(li.annualPremium), "Guideline reviewed"]]), [w.contentW * 0.34, w.contentW * 0.33, w.contentW * 0.33], secondPageTable));
   denseSignatureRow();
   w.finishPage();
 };
@@ -5452,6 +5776,7 @@ const collectMissingItems = (data) => {
   if (businessType === "Life Insurance") {
     const li = data.lifeInsurance?.needsAnalysis || {};
     [
+      ["Needs Analysis Template", lifeNeedsTemplateLabel(li.templateType)],
       ["Client's Name", li.clientName],
       ["Occupation", li.occupation],
       ["Age", li.age],
@@ -5461,6 +5786,14 @@ const collectMissingItems = (data) => {
       ["Advisor Name", li.advisorName],
       ["Annual Premium", li.annualPremium],
     ].forEach(([label, value]) => addMissing(items, "Life Insurance Needs Analysis", label, value));
+    if (li.templateType === "child") {
+      const child = makeLifeNeedsChild(li.child);
+      [["Life Insured", child.lifeInsuredName], ["Life Insured Age", child.age], ["Life Insured Gender", child.gender]].forEach(([label, value]) => addMissing(items, "Child Insurance Needs Analysis", label, value));
+      if (!child.purposeHeadStart && !child.purposeTaxSheltered) items.push({ section: "Child Insurance Needs Analysis", label: "Purpose of Insurance" });
+    } else {
+      addMissing(items, "Life Insurance Needs Analysis", "CI income multiple", li.ciIncomeMultiple);
+      if (Number(li.age || 0) < 70) addMissing(items, "Life Insurance Needs Analysis", "Life income multiple", li.lifeIncomeMultiple);
+    }
     if (!missingHasText(li.newCoverageCI) && !missingHasText(li.newCoverageLife)) {
       items.push({ section: "Life Insurance Needs Analysis", label: "New CI Coverage or New Life Coverage" });
     }
@@ -5967,19 +6300,12 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
   const isSegFund = data.businessType === "Segregated Fund Investment";
   const isLifeIns = data.businessType === "Life Insurance";
   const money = (v) => v ? `$${Number(v).toLocaleString()}` : " - ";
-  const liEarned = Number(li.earnedIncome || 0);
-  const liInvestmentProperties = ensureRows(li.fixedAssets.investmentProperties, makeInvestmentPropertyRow);
-  const liOtherLiquidItems = ensureRows(li.liquidAssets.otherItems, makeOtherLiquidRow);
-  const liFixedNet = (Number(li.fixedAssets.principalMV || 0) + liInvestmentProperties.reduce((s,r) => s + Number(r.marketValue || 0), 0))
-    - (Number(li.fixedAssets.principalLoan || 0) + liInvestmentProperties.reduce((s,r) => s + Number(r.loan || 0), 0));
-  const liLiquidNet = (
-    Number(li.liquidAssets.regMV || 0) + Number(li.liquidAssets.nonRegMV || 0) + Number(li.liquidAssets.bankMV || 0) + liOtherLiquidItems.reduce((s,r) => s + Number(r.marketValue || 0), 0)
-  ) - (
-    Number(li.liquidAssets.regLoan || 0) + Number(li.liquidAssets.nonRegLoan || 0) + Number(li.liquidAssets.bankLoan || 0) + liOtherLiquidItems.reduce((s,r) => s + Number(r.loan || 0), 0)
-  );
-  const liTotalNetWorth = liFixedNet + liLiquidNet + Number(li.businessAssets.fmv || 0) + Number(li.foreignAssets.withProofValue || 0) + Number(li.foreignAssets.withoutProofValue || 0);
-  const liMaxCI = liEarned * Number(li.ciIncomeMultiple || 0) + Number(li.ciMortgage || 0);
-  const liMaxLife = liEarned * Number(li.lifeIncomeMultiple || 0) + Number(li.lifeMortgage || 0);
+  const liCalc = calculateLifeNeeds(li);
+  const liFixedNet = liCalc.fixedNet;
+  const liLiquidNet = liCalc.liquidNet;
+  const liTotalNetWorth = liCalc.totalNetWorth;
+  const liMaxCI = liCalc.maxCI;
+  const liMaxLife = liCalc.maxLife;
 
   return (
     <div className="space-y-5">
@@ -6173,6 +6499,7 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
             </div>
             <div className="grid md:grid-cols-2 gap-x-8">
               <div>
+                <ReviewSummaryRow label="Template" value={lifeNeedsTemplateLabel(li.templateType)}/>
                 <ReviewSummaryRow label="Client Name" value={li.clientName}/>
                 <ReviewSummaryRow label="Occupation" value={li.occupation}/>
                 <ReviewSummaryRow label="Age" value={li.age}/>
@@ -6185,11 +6512,13 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
               </div>
               <div>
                 <ReviewSummaryRow label="Total Net Worth" value={money(liTotalNetWorth)}/>
+                <ReviewSummaryRow label="Eligible earned income" value={money(liCalc.eligibleIncome)}/>
                 <ReviewSummaryRow label="CI income multiple" value={li.ciIncomeMultiple}/>
                 <ReviewSummaryRow label="Life income multiple" value={li.lifeIncomeMultiple}/>
                 <ReviewSummaryRow label="In-force CI coverage" value={money(li.inForceCI)}/>
                 <ReviewSummaryRow label="In-force Life coverage" value={money(li.inForceLife)}/>
                 <ReviewSummaryRow label="Annual Premium" value={money(li.annualPremium)}/>
+                <ReviewSummaryRow label="Suggested maximum annual premium" value={liCalc.suggestedAnnualPremium == null ? " - " : money(liCalc.suggestedAnnualPremium)}/>
               </div>
             </div>
             <ReviewSignaturePlaceholder label={`Policy Owner signature${li.policyOwnerName ? " (" + li.policyOwnerName + ")" : ""}`} />
