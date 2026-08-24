@@ -272,21 +272,23 @@ app.post("/api/auth/local-session", (req, res) => {
 
 app.post("/api/auth/login", (req, res) => {
   const { key, recent } = recentLoginFailures(req);
-  if (recent.length >= LOGIN_FAILURE_LIMIT) {
-    return res.status(429).json({ ok: false, error: "Too many login attempts. Please try again later." });
-  }
   const { username, password, remember } = req.body || {};
   const usernameMatches = typeof username === "string"
     && username.trim().toLowerCase() === getActiveUsername().toLowerCase();
   const passwordMatches = typeof password === "string"
     && password.length <= 200
     && sha256(password) === getActivePasswordHash();
-  if (!usernameMatches || !passwordMatches) {
-    recordLoginFailure(key, recent);
-    return res.status(401).json({ ok: false, error: "Username or password is incorrect" });
+  if (usernameMatches && passwordMatches) {
+    loginAttempts.delete(key);
+    return res.json({ ok: true, ...createSession(!!remember, "remote") });
   }
-  loginAttempts.delete(key);
-  res.json({ ok: true, ...createSession(!!remember, "remote") });
+  if (recent.length >= LOGIN_FAILURE_LIMIT) {
+    const retryAfterSeconds = Math.max(1, Math.ceil((recent[0] + LOGIN_WINDOW_MS - Date.now()) / 1000));
+    res.setHeader("Retry-After", String(retryAfterSeconds));
+    return res.status(429).json({ ok: false, error: "Too many login attempts. Please try again later." });
+  }
+  recordLoginFailure(key, recent);
+  return res.status(401).json({ ok: false, error: "Username or password is incorrect" });
 });
 
 app.get("/api/auth/session", requirePortalSession, (req, res) => {

@@ -118,6 +118,8 @@ The NAS issues a local session automatically, so trusted computers on the home n
 a login screen. Remote access through **https://kyc.tritonwealth.ca/** requires both the configured
 username and password. A remote browser can be trusted for 180 days, and signed sessions survive
 routine NAS/container restarts. Local-only tokens cannot be reused remotely.
+Failed remote logins are rate-limited, but entering the correct credentials immediately clears the
+failure counter so the account owner cannot remain locked out.
 
 When you reach the **Review & Generate PDF** step:
 
