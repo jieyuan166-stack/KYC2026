@@ -819,6 +819,12 @@ const makeChildFamilyMember = (row = {}) => ({
   ciInForce: row.ciInForce ?? "",
   ciPending: row.ciPending ?? "",
 });
+const makeChildLifeInsured = (row = {}) => ({
+  id: row.id || makeRowId(),
+  name: row.name ?? row.lifeInsuredName ?? "",
+  gender: row.gender || "",
+  age: row.age ?? "",
+});
 const makeLifeNeedsGuideline = (guideline = {}, li = {}) => ({
   ciAutoValue: guideline.ciAutoValue ?? "",
   lifeAutoValue: guideline.lifeAutoValue ?? "",
@@ -826,38 +832,28 @@ const makeLifeNeedsGuideline = (guideline = {}, li = {}) => ({
   lifeManualOverride: guideline.lifeManualOverride ?? hasText(li.lifeIncomeMultiple),
 });
 const makeLifeNeedsChild = (child = {}) => {
-  const legacyFamilyMembers = [
-    makeChildFamilyMember({
-      relationship: "Father",
-      lifeInForce: child.parentLifeInForceFather,
-      lifePending: child.parentLifePendingFather,
-      ciInForce: child.parentCIInForceFather,
-      ciPending: child.parentCIPendingFather,
-    }),
-    makeChildFamilyMember({
-      relationship: "Mother",
-      lifeInForce: child.parentLifeInForceMother,
-      lifePending: child.parentLifePendingMother,
-      ciInForce: child.parentCIInForceMother,
-      ciPending: child.parentCIPendingMother,
-    }),
-  ];
-  const familyMembers = Array.isArray(child.familyMembers) && child.familyMembers.length
-    ? child.familyMembers.map(makeChildFamilyMember)
-    : legacyFamilyMembers;
+  const familyMembers = Array.isArray(child.familyMembers) ? child.familyMembers.map(makeChildFamilyMember) : [];
+  const father = familyMembers.find(member => String(member.relationship || "").trim().toLowerCase() === "father");
+  const mother = familyMembers.find(member => String(member.relationship || "").trim().toLowerCase() === "mother");
+  const fromLegacyFamily = (currentValue, member, key) => hasText(currentValue) ? currentValue : (member?.[key] ?? "");
+  const lifeInsureds = Array.isArray(child.lifeInsureds) && child.lifeInsureds.length
+    ? child.lifeInsureds.map(makeChildLifeInsured)
+    : [makeChildLifeInsured({ name: child.lifeInsuredName, gender: child.gender, age: child.age })];
+  const primaryInsured = lifeInsureds[0];
   return {
-    lifeInsuredName: child.lifeInsuredName || "",
-    gender: child.gender || "",
-    age: child.age || "",
+    lifeInsureds,
+    lifeInsuredName: primaryInsured.name,
+    gender: primaryInsured.gender,
+    age: primaryInsured.age,
     familyMembers,
-    parentLifeInForceFather: child.parentLifeInForceFather || "",
-    parentLifeInForceMother: child.parentLifeInForceMother || "",
-    parentLifePendingFather: child.parentLifePendingFather || "",
-    parentLifePendingMother: child.parentLifePendingMother || "",
-    parentCIInForceFather: child.parentCIInForceFather || "",
-    parentCIInForceMother: child.parentCIInForceMother || "",
-    parentCIPendingFather: child.parentCIPendingFather || "",
-    parentCIPendingMother: child.parentCIPendingMother || "",
+    parentLifeInForceFather: fromLegacyFamily(child.parentLifeInForceFather, father, "lifeInForce"),
+    parentLifeInForceMother: fromLegacyFamily(child.parentLifeInForceMother, mother, "lifeInForce"),
+    parentLifePendingFather: fromLegacyFamily(child.parentLifePendingFather, father, "lifePending"),
+    parentLifePendingMother: fromLegacyFamily(child.parentLifePendingMother, mother, "lifePending"),
+    parentCIInForceFather: fromLegacyFamily(child.parentCIInForceFather, father, "ciInForce"),
+    parentCIInForceMother: fromLegacyFamily(child.parentCIInForceMother, mother, "ciInForce"),
+    parentCIPendingFather: fromLegacyFamily(child.parentCIPendingFather, father, "ciPending"),
+    parentCIPendingMother: fromLegacyFamily(child.parentCIPendingMother, mother, "ciPending"),
     purposeHeadStart: !!child.purposeHeadStart,
     purposeTaxSheltered: !!child.purposeTaxSheltered,
     notes: child.notes || "",
@@ -2525,7 +2521,7 @@ const LifeInsuranceNeedsAnalysisForm = ({ data, update, markManualNamePath = () 
   const investmentProperties = calc.investmentProperties;
   const otherLiquidItems = calc.otherLiquidItems;
   const businessRows = calc.businessRows;
-  const familyMembers = ensureRows(d.child?.familyMembers, makeChildFamilyMember);
+  const lifeInsureds = ensureRows(d.child?.lifeInsureds, makeChildLifeInsured);
   const isChild = d.templateType === "child";
   const isBusinessOwner = d.templateType === "businessOwner";
   const updateInvestmentProperty = (i, k, v) => {
@@ -2546,17 +2542,18 @@ const LifeInsuranceNeedsAnalysisForm = ({ data, update, markManualNamePath = () 
   };
   const addBusinessAsset = () => set("businessAssets", { ...d.businessAssets, items: [...businessRows, makeBusinessAssetRow()] });
   const removeBusinessAsset = (i) => set("businessAssets", { ...d.businessAssets, items: businessRows.length > 1 ? businessRows.filter((_, idx) => idx !== i) : businessRows });
-  const updateFamilyMember = (i, key, value) => {
-    const rows = familyMembers.map((row, idx) => idx === i ? { ...row, [key]: value } : row);
-    setChild("familyMembers", rows);
-  };
-  const addFamilyMember = () => {
-    if (familyMembers.length >= 8) return;
-    setChild("familyMembers", [...familyMembers, makeChildFamilyMember()]);
-  };
-  const removeFamilyMember = (i) => setChild("familyMembers", familyMembers.length > 1 ? familyMembers.filter((_, idx) => idx !== i) : familyMembers);
   const setNeed = (key, value) => set("needs", { ...d.needs, [key]: value });
   const setChild = (key, value) => set("child", { ...d.child, [key]: value });
+  const saveLifeInsureds = (rows) => {
+    const primary = rows[0] || makeChildLifeInsured();
+    set("child", { ...d.child, lifeInsureds: rows, lifeInsuredName: primary.name, gender: primary.gender, age: primary.age });
+  };
+  const updateLifeInsured = (i, key, value) => saveLifeInsureds(lifeInsureds.map((row, idx) => idx === i ? { ...row, [key]: value } : row));
+  const addLifeInsured = () => {
+    if (lifeInsureds.length >= 6) return;
+    saveLifeInsureds([...lifeInsureds, makeChildLifeInsured()]);
+  };
+  const removeLifeInsured = (i) => saveLifeInsureds(lifeInsureds.length > 1 ? lifeInsureds.filter((_, idx) => idx !== i) : lifeInsureds);
   const setMultiple = (kind, value) => {
     const key = kind === "ci" ? "ciIncomeMultiple" : "lifeIncomeMultiple";
     const manualKey = kind === "ci" ? "ciManualOverride" : "lifeManualOverride";
@@ -2786,32 +2783,33 @@ const LifeInsuranceNeedsAnalysisForm = ({ data, update, markManualNamePath = () 
 
       {isChild && (
         <>
-          <div className="section-header">CHILD FAMILY COVERAGE INFORMATION</div>
+          <div className="section-header">CHILD &amp; FAMILY COVERAGE INFORMATION</div>
           <table className="kyc-table">
+            <thead><tr><th>Life Insured</th><th>Gender</th><th>Age</th><th></th></tr></thead>
             <tbody>
-              <tr><th>Life Insured</th><td><TextInput value={d.child.lifeInsuredName} onChange={v=>setChild("lifeInsuredName",v)}/></td><th>Gender</th><td><Select value={d.child.gender} onChange={v=>setChild("gender",v)} options={[{value:"",label:"Select"},{value:"Male",label:"Male"},{value:"Female",label:"Female"},{value:"Other",label:"Other"}]}/></td><th>Age</th><td><TextInput type="number" value={d.child.age} onChange={v=>setChild("age",v)}/></td></tr>
-            </tbody>
-          </table>
-          <table className="kyc-table">
-            <thead><tr><th>Family Member</th><th>Relationship</th><th>Life In-force</th><th>Life Pending</th><th>CI In-force</th><th>CI Pending</th><th></th></tr></thead>
-            <tbody>
-              {familyMembers.map((member, i) => (
-                <tr key={member.id || i}>
-                  <td><TextInput value={member.name} onChange={v=>updateFamilyMember(i,"name",v)} placeholder="Name"/></td>
-                  <td><TextInput value={member.relationship} onChange={v=>updateFamilyMember(i,"relationship",v)} placeholder="Father, Mother, Guardian..."/></td>
-                  <td><TextInput type="number" value={member.lifeInForce} onChange={v=>updateFamilyMember(i,"lifeInForce",v)}/></td>
-                  <td><TextInput type="number" value={member.lifePending} onChange={v=>updateFamilyMember(i,"lifePending",v)}/></td>
-                  <td><TextInput type="number" value={member.ciInForce} onChange={v=>updateFamilyMember(i,"ciInForce",v)}/></td>
-                  <td><TextInput type="number" value={member.ciPending} onChange={v=>updateFamilyMember(i,"ciPending",v)}/></td>
-                  <td><button type="button" className="px-2 py-1 border rounded text-xs text-gray-600" onClick={()=>removeFamilyMember(i)} disabled={familyMembers.length <= 1}>Remove</button></td>
+              {lifeInsureds.map((insured, i) => (
+                <tr key={insured.id || i}>
+                  <td><TextInput value={insured.name} onChange={v=>updateLifeInsured(i,"name",v)} placeholder="Life Insured Name"/></td>
+                  <td><Select value={insured.gender} onChange={v=>updateLifeInsured(i,"gender",v)} options={["Male","Female","Other"]}/></td>
+                  <td><TextInput type="number" value={insured.age} onChange={v=>updateLifeInsured(i,"age",v)}/></td>
+                  <td><button type="button" className="px-2 py-1 border rounded text-xs text-gray-600" onClick={()=>removeLifeInsured(i)} disabled={lifeInsureds.length <= 1}>Remove</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
           <div className="flex items-center gap-3">
-            <button type="button" onClick={addFamilyMember} disabled={familyMembers.length >= 8} className="px-3 py-2 border border-[#C9A961] text-[#0B1E3F] rounded text-sm font-medium disabled:opacity-50">+ Add Family Member</button>
-            <span className="text-xs text-gray-500">Up to 8 family members</span>
+            <button type="button" onClick={addLifeInsured} disabled={lifeInsureds.length >= 6} className="px-3 py-2 border border-[#C9A961] text-[#0B1E3F] rounded text-sm font-medium disabled:opacity-50">+ Add Life Insured</button>
+            <span className="text-xs text-gray-500">Up to 6 life insureds</span>
           </div>
+          <table className="kyc-table">
+            <thead><tr><th>Parents' Coverage</th><th>Father</th><th>Mother</th></tr></thead>
+            <tbody>
+              <tr><td>Life insurance in-force</td><td><TextInput type="number" value={d.child.parentLifeInForceFather} onChange={v=>setChild("parentLifeInForceFather",v)}/></td><td><TextInput type="number" value={d.child.parentLifeInForceMother} onChange={v=>setChild("parentLifeInForceMother",v)}/></td></tr>
+              <tr><td>Life insurance pending</td><td><TextInput type="number" value={d.child.parentLifePendingFather} onChange={v=>setChild("parentLifePendingFather",v)}/></td><td><TextInput type="number" value={d.child.parentLifePendingMother} onChange={v=>setChild("parentLifePendingMother",v)}/></td></tr>
+              <tr><td>Critical illness insurance in-force</td><td><TextInput type="number" value={d.child.parentCIInForceFather} onChange={v=>setChild("parentCIInForceFather",v)}/></td><td><TextInput type="number" value={d.child.parentCIInForceMother} onChange={v=>setChild("parentCIInForceMother",v)}/></td></tr>
+              <tr><td>Critical illness insurance pending</td><td><TextInput type="number" value={d.child.parentCIPendingFather} onChange={v=>setChild("parentCIPendingFather",v)}/></td><td><TextInput type="number" value={d.child.parentCIPendingMother} onChange={v=>setChild("parentCIPendingMother",v)}/></td></tr>
+            </tbody>
+          </table>
           <div className="border border-gray-200 bg-gray-50 p-3 rounded">
             <div className="font-semibold text-navy mb-2">Purpose of Insurance</div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -5472,14 +5470,19 @@ const drawLifeInsuranceVector = (w, li) => {
   w.y -= 10;
   if (isChild) {
     const child = makeLifeNeedsChild(li.child);
-    const familyMembers = ensureRows(child.familyMembers, makeChildFamilyMember);
-    lifeSection("Life Insured", () => w.fields([["Life Insured", child.lifeInsuredName], ["Gender", child.gender], ["Age", child.age]], 3, { dense: true }));
-    lifeSection("Family Coverage Information", () => w.table(
-      ["Family Member", "Relationship", "Life In-force", "Life Pending", "CI In-force", "CI Pending"],
-      pdfRows(familyMembers.map(member => [member.name, member.relationship, fmtMoney(member.lifeInForce), fmtMoney(member.lifePending), fmtMoney(member.ciInForce), fmtMoney(member.ciPending)])),
-      [w.contentW * 0.21, w.contentW * 0.15, w.contentW * 0.16, w.contentW * 0.16, w.contentW * 0.16, w.contentW * 0.16],
+    const lifeInsureds = ensureRows(child.lifeInsureds, makeChildLifeInsured);
+    lifeSection("Life Insured", () => w.table(
+      ["Life Insured Name", "Gender", "Age"],
+      pdfRows(lifeInsureds.map(insured => [insured.name, insured.gender, insured.age])),
+      [w.contentW * 0.62, w.contentW * 0.23, w.contentW * 0.15],
       secondPageTable
     ));
+    lifeSection("Parents' Insurance", () => w.table(["Coverage", "Father", "Mother"], pdfRows([
+      ["Life insurance in-force", fmtMoney(child.parentLifeInForceFather), fmtMoney(child.parentLifeInForceMother)],
+      ["Life insurance pending", fmtMoney(child.parentLifePendingFather), fmtMoney(child.parentLifePendingMother)],
+      ["Critical illness in-force", fmtMoney(child.parentCIInForceFather), fmtMoney(child.parentCIInForceMother)],
+      ["Critical illness pending", fmtMoney(child.parentCIPendingFather), fmtMoney(child.parentCIPendingMother)],
+    ]), null, secondPageTable));
     lifeSection("Child Coverage & Purpose", () => w.table(["Item", "Critical Illness", "Life Insurance"], pdfRows([["Optional manual income multiple", `${li.ciIncomeMultiple || "0"} x eligible income`, `${li.lifeIncomeMultiple || "0"} x eligible income`], ["Child's in-force coverage", fmtMoney(li.inForceCI), fmtMoney(li.inForceLife)], ["New coverage to be placed", fmtMoney(li.newCoverageCI), fmtMoney(li.newCoverageLife)], ["Purpose of insurance", child.purposeHeadStart ? "Head Start" : " - ", child.purposeTaxSheltered ? "Tax-sheltered Saving" : " - "]]), [w.contentW * 0.40, w.contentW * 0.30, w.contentW * 0.30], secondPageTable));
     if (hasText(child.notes)) lifeSection("Recommendations / Notes", () => w.textBlock(child.notes, { size: 6.8, lineH: 3.3, gap: 0.5 }));
   } else {
@@ -5838,7 +5841,11 @@ const collectMissingItems = (data) => {
     ].forEach(([label, value]) => addMissing(items, "Life Insurance Needs Analysis", label, value));
     if (li.templateType === "child") {
       const child = makeLifeNeedsChild(li.child);
-      [["Life Insured", child.lifeInsuredName], ["Life Insured Age", child.age], ["Life Insured Gender", child.gender]].forEach(([label, value]) => addMissing(items, "Child Insurance Needs Analysis", label, value));
+      ensureRows(child.lifeInsureds, makeChildLifeInsured).forEach((insured, index) => {
+        addMissing(items, "Child Insurance Needs Analysis", `Life Insured ${index + 1} Name`, insured.name);
+        addMissing(items, "Child Insurance Needs Analysis", `Life Insured ${index + 1} Age`, insured.age);
+        addMissing(items, "Child Insurance Needs Analysis", `Life Insured ${index + 1} Gender`, insured.gender);
+      });
       if (!child.purposeHeadStart && !child.purposeTaxSheltered) items.push({ section: "Child Insurance Needs Analysis", label: "Purpose of Insurance" });
     } else {
       addMissing(items, "Life Insurance Needs Analysis", "CI income multiple", li.ciIncomeMultiple);
@@ -6552,7 +6559,7 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
                 <ReviewSummaryRow label="Client Name" value={li.clientName}/>
                 <ReviewSummaryRow label="Occupation" value={li.occupation}/>
                 <ReviewSummaryRow label="Age" value={li.age}/>
-                {li.templateType === "child" && <ReviewSummaryRow label="Family members" value={makeLifeNeedsChild(li.child).familyMembers.filter(member => hasText(member.name) || hasText(member.relationship)).length}/>}
+                {li.templateType === "child" && <ReviewSummaryRow label="Life insureds" value={makeLifeNeedsChild(li.child).lifeInsureds.filter(insured => hasText(insured.name) || hasText(insured.gender) || hasText(insured.age)).length}/>}
                 <ReviewSummaryRow label="Earned income" value={money(li.earnedIncome)}/>
                 <ReviewSummaryRow label="Unearned income" value={money(li.unearnedIncome)}/>
                 <ReviewSummaryRow label="Spouse income" value={money(li.spouseIncome)}/>
