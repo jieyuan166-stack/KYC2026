@@ -114,9 +114,10 @@ Expected: `{ "ok": true, "hasClientId": true, "hasClientSecret": true, "hasRefre
 ## 5. Use the portal
 
 Open **http://192.168.50.158:3000/** while connected to the same private network as the NAS.
-The NAS issues a local session automatically, so the hosted portal does not show a password screen.
-Requests arriving through the public Cloudflare tunnel cannot create sessions or access drafts,
-password changes, or Adobe Sign. The public health endpoint remains available for uptime checks.
+The NAS issues a local session automatically, so trusted computers on the home network do not show
+a login screen. Remote access through **https://kyc.tritonwealth.ca/** requires both the configured
+username and password. A remote browser can be trusted for 180 days, and signed sessions survive
+routine NAS/container restarts. Local-only tokens cannot be reused remotely.
 
 When you reach the **Review & Generate PDF** step:
 
@@ -131,7 +132,7 @@ When you reach the **Review & Generate PDF** step:
 
 ### `POST /api/auth/login`
 
-Authenticates the portal password and returns a temporary session token.
+Authenticates the portal username and password and returns a temporary session token.
 When `remember` is enabled, the signed trusted-device token remains valid for
 180 days and survives routine NAS/container restarts. Changing the portal
 password invalidates all previously issued signed tokens.

@@ -496,11 +496,11 @@ const portalAuthHeaders = () => {
   return session ? { Authorization: `Bearer ${session.token}` } : {};
 };
 
-const loginToServer = async (password, remember) => {
+const loginToServer = async (username, password, remember) => {
   const res = await fetch("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password, remember }),
+    body: JSON.stringify({ username, password, remember }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.ok) {
@@ -509,6 +509,20 @@ const loginToServer = async (password, remember) => {
     throw err;
   }
   savePortalSession(data, remember);
+  return data;
+};
+
+const validatePortalSession = async () => {
+  const res = await fetch("/api/auth/session", {
+    headers: portalAuthHeaders(),
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    const err = new Error(data.error || "Session is no longer valid");
+    err.status = res.status;
+    throw err;
+  }
   return data;
 };
 
@@ -6281,6 +6295,7 @@ const isPortalUnlocked = () => (
 const getActivePasswordHash = () => localStorage.getItem(AUTH_CUSTOM_PASSWORD_HASH_KEY) || AUTH_PASSWORD_HASH;
 
 const LoginScreen = ({ onLogin }) => {
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState("");
@@ -6293,10 +6308,14 @@ const LoginScreen = ({ onLogin }) => {
     try {
       if (isServerBackedPortal()) {
         try {
-          await loginToServer(password, remember);
+          await loginToServer(username, password, remember);
         } catch (serverErr) {
           if (serverErr.status === 401) {
-            setError("Password is incorrect · 密码不正确");
+            setError("Username or password is incorrect · 用户名或密码不正确");
+            return;
+          }
+          if (serverErr.status === 429) {
+            setError("Too many attempts. Please try again in 15 minutes. · 尝试次数过多，请稍后再试");
             return;
           }
           setError("Server login is unavailable. Please check NAS app status. · NAS 登录服务暂时不可用");
@@ -6325,8 +6344,11 @@ const LoginScreen = ({ onLogin }) => {
         <h1 className="text-2xl font-bold text-navy mt-2 mb-2">Triton KYC Login</h1>
         <p className="text-sm text-gray-600 mb-6">Please sign in before viewing or editing client compliance drafts.</p>
         <form onSubmit={submit} className="space-y-4">
+          {isServerBackedPortal() && <Field label="Username" required>
+            <TextInput value={username} onChange={setUsername} placeholder="Enter username" autoComplete="username" autoCapitalize="none"/>
+          </Field>}
           <Field label="Password" required>
-            <TextInput type="password" value={password} onChange={setPassword} placeholder="Enter portal password"/>
+            <TextInput type="password" value={password} onChange={setPassword} placeholder="Enter portal password" autoComplete="current-password"/>
           </Field>
           <label className="flex items-center gap-2 text-sm text-gray-700">
             <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} style={{ width: 16 }}/>
@@ -6334,7 +6356,7 @@ const LoginScreen = ({ onLogin }) => {
           </label>
           <p className="text-xs text-gray-500" style={{ marginTop: -8 }}>Use Logout when working on a shared device.</p>
           {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm">{error}</div>}
-          <button type="submit" disabled={busy || !password} className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed">
+          <button type="submit" disabled={busy || !password || (isServerBackedPortal() && !username.trim())} className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed">
             {busy ? "Checking..." : "Login"}
           </button>
           <a
@@ -6353,12 +6375,12 @@ const NetworkAccessScreen = ({ checking = false }) => (
   <div className="min-h-screen flex items-center justify-center px-4" style={{ background: "var(--c-bg-deep)" }}>
     <div className="w-full max-w-md bg-white border border-gray-200 rounded-lg p-8 text-center" style={{ boxShadow: "0 28px 70px rgba(0,0,0,0.22)" }}>
       <img src={window.TRITON_LOGO || "./triton-logo.png"} alt="Triton Wealth Management" style={{ height: 58, width: "auto", margin: "0 auto 22px" }}/>
-      <div className="en-label" style={{ color: "var(--c-bg-deep)", letterSpacing: "0.12em" }}>Local Network Portal</div>
-      <h1 className="text-2xl font-bold text-navy mt-2 mb-3">{checking ? "Checking secure access..." : "Local network access only"}</h1>
+      <div className="en-label" style={{ color: "var(--c-bg-deep)", letterSpacing: "0.12em" }}>Secure Portal</div>
+      <h1 className="text-2xl font-bold text-navy mt-2 mb-3">{checking ? "Checking secure access..." : "Secure connection unavailable"}</h1>
       <p className="text-sm text-gray-600">
         {checking
           ? "Connecting securely to the NAS."
-          : "This compliance portal is available only while connected to the same private network as the Triton NAS."}
+          : "The portal could not verify access. Please check your connection and try again."}
       </p>
       {!checking && <button type="button" onClick={() => window.location.reload()} className="btn-primary w-full mt-6">Try Again</button>}
     </div>
@@ -6559,16 +6581,29 @@ const App = () => {
       try {
         const local = await getPortalNetworkAccess();
         if (cancelled) return;
-        if (!local) {
-          clearPortalSession();
-          setPortalUnlocked(false);
+        if (local) {
+          await createLocalPortalSession();
+          if (cancelled) return;
+          setPortalUnlocked(true);
+          setNetworkAccess("local");
+        } else {
+          const storedSession = getStoredPortalSession();
+          if (storedSession) {
+            try {
+              await validatePortalSession();
+              if (cancelled) return;
+              localStorage.setItem(AUTH_KEY, "ok");
+              setPortalUnlocked(true);
+            } catch {
+              clearPortalSession();
+              if (cancelled) return;
+              setPortalUnlocked(false);
+            }
+          } else {
+            setPortalUnlocked(false);
+          }
           setNetworkAccess("external");
-          return;
         }
-        await createLocalPortalSession();
-        if (cancelled) return;
-        setPortalUnlocked(true);
-        setNetworkAccess("local");
       } catch {
         if (!cancelled) {
           clearPortalSession();
@@ -6846,7 +6881,7 @@ const App = () => {
   if (isServerBackedPortal() && networkAccess === "checking") {
     return <NetworkAccessScreen checking/>;
   }
-  if (isServerBackedPortal() && networkAccess !== "local") {
+  if (isServerBackedPortal() && networkAccess === "error") {
     return <NetworkAccessScreen/>;
   }
   if (!portalUnlocked) {
@@ -6891,8 +6926,8 @@ const App = () => {
               className="px-4 py-2 text-xs uppercase tracking-widest font-medium border border-[#C9A961] text-[#C9A961] rounded hover:bg-[#C9A961] hover:text-[#0B1E3F] transition">
               Save Draft
             </button>
-            {!isServerBackedPortal() && <button onClick={() => setChangePasswordOpen(true)} className="px-4 py-2 text-xs uppercase tracking-widest font-medium border border-white/35 text-white rounded hover:bg-white hover:text-[#0B1E3F] transition">Change Password</button>}
-            {!isServerBackedPortal() && <button onClick={handleLogout} className="px-4 py-2 text-xs uppercase tracking-widest font-medium border border-white/35 text-white rounded hover:bg-white hover:text-[#0B1E3F] transition">Logout</button>}
+            {(!isServerBackedPortal() || networkAccess === "external") && <button onClick={() => setChangePasswordOpen(true)} className="px-4 py-2 text-xs uppercase tracking-widest font-medium border border-white/35 text-white rounded hover:bg-white hover:text-[#0B1E3F] transition">Change Password</button>}
+            {(!isServerBackedPortal() || networkAccess === "external") && <button onClick={handleLogout} className="px-4 py-2 text-xs uppercase tracking-widest font-medium border border-white/35 text-white rounded hover:bg-white hover:text-[#0B1E3F] transition">Logout</button>}
             <button onClick={handleResetAll} className="btn-danger uppercase tracking-widest">Reset</button>
           </div>
         </div>

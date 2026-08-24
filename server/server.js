@@ -55,8 +55,12 @@ app.use(cors({
 }));
 
 const sendAttempts = new Map();
+const loginAttempts = new Map();
 const SEND_WINDOW_MS = 15 * 60 * 1000;
 const SEND_LIMIT = 10;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_FAILURE_LIMIT = 5;
+const DEFAULT_KYC_USERNAME = "jieyuan";
 const DEFAULT_KYC_PASSWORD_HASH = "b4d892dcdd1c8a38a97f6cfcac5bf20075d10947cd9cde9d41e18d2bb2f216d9";
 const DATA_DIR = process.env.KYC_DATA_DIR || path.join(__dirname, "data");
 const DRAFTS_PATH = path.join(DATA_DIR, "drafts.json");
@@ -109,6 +113,8 @@ const getActivePasswordHash = () => {
   return auth?.passwordHash || DEFAULT_KYC_PASSWORD_HASH;
 };
 
+const getActiveUsername = () => String(process.env.KYC_USERNAME || DEFAULT_KYC_USERNAME).trim();
+
 const sessionSigningKey = () => crypto
   .createHash("sha256")
   .update(`triton-kyc-session-v${SESSION_TOKEN_VERSION}:${getActivePasswordHash()}`, "utf8")
@@ -119,13 +125,14 @@ const signSessionPayload = (encodedPayload) => crypto
   .update(encodedPayload, "utf8")
   .digest("base64url");
 
-const createSession = (remember) => {
+const createSession = (remember, scope = "remote") => {
   const ttlMs = remember ? TRUSTED_DEVICE_TTL_MS : STANDARD_SESSION_TTL_MS;
   const expiresAt = Date.now() + ttlMs;
   const payload = Buffer.from(JSON.stringify({
     v: SESSION_TOKEN_VERSION,
     iat: Date.now(),
     exp: expiresAt,
+    scope: scope === "local" ? "local" : "remote",
     nonce: crypto.randomBytes(16).toString("hex"),
   }), "utf8").toString("base64url");
   const token = `${payload}.${signSessionPayload(payload)}`;
@@ -142,7 +149,7 @@ const verifySignedSession = (token) => {
     if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) return null;
     const payload = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
     if (payload?.v !== SESSION_TOKEN_VERSION || !Number.isFinite(payload?.exp) || payload.exp <= Date.now()) return null;
-    return payload.exp;
+    return { expiresAt: payload.exp, scope: payload.scope === "remote" ? "remote" : "local" };
   } catch {
     return null;
   }
@@ -170,18 +177,42 @@ const isTrustedLocalRequest = (req) => {
   return isPrivateAddress(req.socket?.remoteAddress);
 };
 
-const requirePortalSession = (req, res, next) => {
-  if (!isTrustedLocalRequest(req)) {
-    return res.status(403).json({ ok: false, error: "Local network access required" });
+const loginAttemptKey = (req) => String(
+  req.get("cf-connecting-ip") || req.ip || req.socket?.remoteAddress || "unknown"
+).trim();
+
+const recentLoginFailures = (req) => {
+  const key = loginAttemptKey(req);
+  const cutoff = Date.now() - LOGIN_WINDOW_MS;
+  const recent = (loginAttempts.get(key) || []).filter(ts => ts > cutoff);
+  if (recent.length) loginAttempts.set(key, recent);
+  else loginAttempts.delete(key);
+  return { key, recent };
+};
+
+const recordLoginFailure = (key, recent) => {
+  loginAttempts.set(key, [...recent, Date.now()]);
+  if (loginAttempts.size > 5000) {
+    const cutoff = Date.now() - LOGIN_WINDOW_MS;
+    for (const [attemptKey, timestamps] of loginAttempts) {
+      if (!timestamps.some(ts => ts > cutoff)) loginAttempts.delete(attemptKey);
+    }
   }
+};
+
+const requirePortalSession = (req, res, next) => {
   const token = getBearerToken(req);
-  // Legacy in-memory tokens remain valid until the next restart; signed tokens
-  // let trusted browsers stay authenticated across routine NAS container restarts.
-  const expiresAt = verifySignedSession(token) || authSessions.get(token);
-  if (!token || !expiresAt || expiresAt <= Date.now()) {
+  const signedSession = verifySignedSession(token);
+  const legacyExpiresAt = authSessions.get(token);
+  const session = signedSession || (legacyExpiresAt ? { expiresAt: legacyExpiresAt, scope: "local" } : null);
+  if (!token || !session || session.expiresAt <= Date.now()) {
     if (token) authSessions.delete(token);
     return res.status(401).json({ ok: false, error: "Unauthorized" });
   }
+  if (!isTrustedLocalRequest(req) && session.scope !== "remote") {
+    return res.status(403).json({ ok: false, error: "Remote login required" });
+  }
+  req.portalSession = session;
   next();
 };
 
@@ -236,21 +267,30 @@ app.post("/api/auth/local-session", (req, res) => {
   if (!isTrustedLocalRequest(req)) {
     return res.status(403).json({ ok: false, error: "Local network access required" });
   }
-  res.json({ ok: true, ...createSession(true) });
+  res.json({ ok: true, ...createSession(true, "local") });
 });
 
 app.post("/api/auth/login", (req, res) => {
-  if (!isTrustedLocalRequest(req)) {
-    return res.status(403).json({ ok: false, error: "Local network access required" });
+  const { key, recent } = recentLoginFailures(req);
+  if (recent.length >= LOGIN_FAILURE_LIMIT) {
+    return res.status(429).json({ ok: false, error: "Too many login attempts. Please try again later." });
   }
-  const { password, remember } = req.body || {};
-  if (typeof password !== "string" || password.length > 200) {
-    return res.status(400).json({ ok: false, error: "Invalid password" });
+  const { username, password, remember } = req.body || {};
+  const usernameMatches = typeof username === "string"
+    && username.trim().toLowerCase() === getActiveUsername().toLowerCase();
+  const passwordMatches = typeof password === "string"
+    && password.length <= 200
+    && sha256(password) === getActivePasswordHash();
+  if (!usernameMatches || !passwordMatches) {
+    recordLoginFailure(key, recent);
+    return res.status(401).json({ ok: false, error: "Username or password is incorrect" });
   }
-  if (sha256(password) !== getActivePasswordHash()) {
-    return res.status(401).json({ ok: false, error: "Password is incorrect" });
-  }
-  res.json({ ok: true, ...createSession(!!remember) });
+  loginAttempts.delete(key);
+  res.json({ ok: true, ...createSession(!!remember, "remote") });
+});
+
+app.get("/api/auth/session", requirePortalSession, (req, res) => {
+  res.json({ ok: true, scope: req.portalSession.scope, expiresAt: req.portalSession.expiresAt });
 });
 
 app.post("/api/auth/change-password", requirePortalSession, (req, res) => {
@@ -269,7 +309,7 @@ app.post("/api/auth/change-password", requirePortalSession, (req, res) => {
     updatedAt: Date.now(),
   });
   authSessions.clear();
-  res.json({ ok: true, ...createSession(true) });
+  res.json({ ok: true, ...createSession(true, req.portalSession?.scope || "remote") });
 });
 
 app.get("/api/drafts", requirePortalSession, (req, res) => {
