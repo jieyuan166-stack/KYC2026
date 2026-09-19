@@ -1080,16 +1080,6 @@ const getDraftClientName = (draft) => {
 const getDraftAdvisorKey = (draft) => draft?.formData?.advisorProfileKey || DEFAULT_ADVISOR_PROFILE_KEY;
 const getDraftSpouseName = (draft) => (draft.formData?.advisorDisclosure?.client2Name || "").trim();
 
-/* Privacy-mask a name: keep first char, asterisk the rest (Chinese-aware) */
-const maskName = (name) => {
-  if (!name) return "";
-  if (name.length <= 1) return name;
-  // Chinese: keep first char + asterisks for the rest
-  if (/[一-鿿]/.test(name)) return name[0] + "*".repeat(Math.max(1, name.length - 1));
-  // English: keep first letter + 3 asterisks
-  return name[0] + "***";
-};
-
 /* What step is the draft on — return a {label, idx} pair */
 const STEP_CN_LABELS = {
   advisorDisclosure:        "顾问声明",
@@ -6893,17 +6883,15 @@ const ChangePasswordModal = ({ open, onClose }) => {
 const DraftCard = ({ draft, active, onClick, onDelete }) => {
   const name = getDraftClientName(draft);
   const spouse = getDraftSpouseName(draft);
-  const masked = maskName(name);
-  const maskedSpouse = maskName(spouse);
   const stepLabel = getDraftStepLabel(draft);
   const ts = formatDraftTimestamp(draft.updatedAt);
-  const displayName = masked || "新客户表单 (编辑中…)";
+  const displayName = name || "新客户表单 (编辑中…)";
   return (
     <div className={`draft-card ${active ? "active" : ""}`} onClick={onClick}>
       <div className="draft-card-row">
         <div className="draft-name" title={name || "Unnamed draft"}>
           {displayName}
-          {maskedSpouse && <span style={{ opacity: 0.7, fontWeight: 400 }}> &amp; {maskedSpouse}</span>}
+          {spouse && <span style={{ opacity: 0.7, fontWeight: 400 }}> &amp; {spouse}</span>}
         </div>
         <button
           className="draft-delete"
