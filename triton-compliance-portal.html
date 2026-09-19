@@ -940,12 +940,33 @@ const calculateLifeNeeds = (li = {}) => {
     maxCI, maxLife, netWorthLimit, incomeLimit, suggestedAnnualPremium,
   };
 };
-const makeIncomeOtherRow = (row = {}) => ({
-  id: row.id || makeRowId(),
-  label: row.label || row.name || "Other",
-  annual: row.annual ?? row.amount ?? "",
-  monthly: row.monthly ?? "",
-});
+const LEVERAGE_INCOME_KEYS = ["empClient", "empJoint", "investment", "rental"];
+const monthlyIncomeFromAnnual = (annual) => {
+  const raw = String(annual ?? "").trim();
+  if (!raw) return "";
+  const amount = Number(raw);
+  if (!Number.isFinite(amount)) return "";
+  return String(Math.round(((amount / 12) + Number.EPSILON) * 100) / 100);
+};
+const makeIncomeOtherRow = (row = {}) => {
+  const annual = row.annual ?? row.amount ?? "";
+  return {
+    id: row.id || makeRowId(),
+    label: row.label || row.name || "Other",
+    annual,
+    monthly: monthlyIncomeFromAnnual(annual),
+  };
+};
+const calculateLeverageIncome = (income = {}) => {
+  const otherItems = ensureRows(income.otherItems, makeIncomeOtherRow).map(makeIncomeOtherRow);
+  const monthlyByKey = {};
+  LEVERAGE_INCOME_KEYS.forEach(key => { monthlyByKey[key] = monthlyIncomeFromAnnual(income[key]); });
+  const totalAnnual = LEVERAGE_INCOME_KEYS.reduce((sum, key) => sum + Number(income[key] || 0), 0)
+    + otherItems.reduce((sum, row) => sum + Number(row.annual || 0), 0);
+  const totalMonthly = LEVERAGE_INCOME_KEYS.reduce((sum, key) => sum + Number(monthlyByKey[key] || 0), 0)
+    + otherItems.reduce((sum, row) => sum + Number(row.monthly || 0), 0);
+  return { otherItems, monthlyByKey, totalAnnual, totalMonthly };
+};
 const makeNetWorthOtherRow = (row = {}) => ({
   id: row.id || makeRowId(),
   label: row.label || row.name || "Other",
@@ -1004,7 +1025,12 @@ function normalizeFormData(formData) {
       (lc.income.other1Label || lc.income.other1 || lc.incomeMonthly.other1) && makeIncomeOtherRow({ label: lc.income.other1Label, annual: lc.income.other1, monthly: lc.incomeMonthly.other1 }),
       (lc.income.other2Label || lc.income.other2 || lc.incomeMonthly.other2) && makeIncomeOtherRow({ label: lc.income.other2Label, annual: lc.income.other2, monthly: lc.incomeMonthly.other2 }),
     ].filter(Boolean);
-    lc.income.otherItems = ensureRows(lc.income.otherItems || legacyIncomeRows, makeIncomeOtherRow);
+    lc.income.otherItems = ensureRows(lc.income.otherItems || legacyIncomeRows, makeIncomeOtherRow).map(makeIncomeOtherRow);
+    const incomeSummary = calculateLeverageIncome(lc.income);
+    lc.income.otherItems = incomeSummary.otherItems;
+    lc.income.totalAnnual = String(incomeSummary.totalAnnual || "");
+    lc.income.totalMonthly = String(incomeSummary.totalMonthly || "");
+    lc.incomeMonthly = { ...lc.incomeMonthly, ...incomeSummary.monthlyByKey };
 
     lc.netWorth = lc.netWorth || {};
     const legacyNetWorthRows = [
@@ -1569,14 +1595,28 @@ const LeverageComplianceForm = ({ data, update, markManualNamePath = () => {} })
     leverageCompliance: { ...d, [k]: v }
   });
   const setNested = (parent, k, v) => set(parent, { ...d[parent], [k]: v });
-  const incomeOtherItems = ensureRows(d.income.otherItems, makeIncomeOtherRow);
+  const incomeSummary = calculateLeverageIncome(d.income);
+  const incomeOtherItems = incomeSummary.otherItems;
   const netWorthOtherItems = ensureRows(d.netWorth.otherItems, makeNetWorthOtherRow);
+  const setAnnualIncome = (key, value) => update("segregatedFundInvestment", {
+    ...data.segregatedFundInvestment,
+    leverageCompliance: {
+      ...d,
+      income: { ...d.income, [key]: value },
+      incomeMonthly: { ...d.incomeMonthly, [key]: monthlyIncomeFromAnnual(value) },
+    },
+  });
   const updateDebt = (i, k, v) => {
     const arr = d.debt.map((row, idx) => idx === i ? { ...row, [k]: v } : row);
     set("debt", arr);
   };
   const updateIncomeOther = (i, k, v) => {
-    const rows = incomeOtherItems.map((row, idx) => idx === i ? { ...row, [k]: v } : row);
+    const rows = incomeOtherItems.map((row, idx) => {
+      if (idx !== i) return row;
+      const updated = { ...row, [k]: v };
+      if (k === "annual") updated.monthly = monthlyIncomeFromAnnual(v);
+      return updated;
+    });
     set("income", { ...d.income, otherItems: rows });
   };
   const updateNetWorthOther = (i, k, v) => {
@@ -1592,11 +1632,8 @@ const LeverageComplianceForm = ({ data, update, markManualNamePath = () => {} })
 
   /* ---- auto-computed totals (kept fresh each render, not stored as separate state) ---- */
   const n = (v) => Number(v || 0);
-  const incomeKeys = ["empClient","empJoint","investment","rental"];
-  const totalAnnualIncome  = incomeKeys.reduce((s,k) => s + n(d.income[k]), 0);
-  const totalAnnualIncomeWithOther = totalAnnualIncome + incomeOtherItems.reduce((s,r) => s + n(r.annual), 0);
-  const totalMonthlyIncome = incomeKeys.reduce((s,k) => s + n(d.incomeMonthly[k]), 0);
-  const totalMonthlyIncomeWithOther = totalMonthlyIncome + incomeOtherItems.reduce((s,r) => s + n(r.monthly), 0);
+  const totalAnnualIncomeWithOther = incomeSummary.totalAnnual;
+  const totalMonthlyIncomeWithOther = incomeSummary.totalMonthly;
   const nwKeys = ["regClient","regJoint","nonRegClient","nonRegJoint","fixedClient","fixedJoint"];
   const totalNetWorth = nwKeys.reduce((s,k) => s + n(d.netWorth[k]), 0);
   const otherNetWorthClient = netWorthOtherItems.reduce((s,r)=> s + n(r.client), 0);
@@ -1614,6 +1651,7 @@ const LeverageComplianceForm = ({ data, update, markManualNamePath = () => {} })
   useEffect(() => {
     const patch = {
       income: { ...d.income, otherItems: incomeOtherItems, totalAnnual: String(totalAnnualIncomeWithOther || ""), totalMonthly: String(totalMonthlyIncomeWithOther || "") },
+      incomeMonthly: { ...d.incomeMonthly, ...incomeSummary.monthlyByKey },
       netWorth: { ...d.netWorth, otherItems: netWorthOtherItems, total: String(totalNetWorthWithOther || "") },
       totalLiabilities: String(totalLiab || ""),
       totalMonthlyDebt: String(totalMonthlyDebt || ""),
@@ -1624,6 +1662,8 @@ const LeverageComplianceForm = ({ data, update, markManualNamePath = () => {} })
     const changed =
       d.income.totalAnnual !== patch.income.totalAnnual ||
       d.income.totalMonthly !== patch.income.totalMonthly ||
+      LEVERAGE_INCOME_KEYS.some(key => d.incomeMonthly[key] !== patch.incomeMonthly[key]) ||
+      incomeOtherItems.some((row, idx) => d.income.otherItems?.[idx]?.monthly !== row.monthly) ||
       d.netWorth.total !== patch.netWorth.total ||
       d.totalLiabilities !== patch.totalLiabilities ||
       d.totalMonthlyDebt !== patch.totalMonthlyDebt ||
@@ -1647,7 +1687,7 @@ const LeverageComplianceForm = ({ data, update, markManualNamePath = () => {} })
       {value}{suffix}
     </div>
   );
-  const fmt$ = (v) => v ? "$" + Number(v).toLocaleString() : "$0";
+  const fmt$ = (v) => "$" + Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
   return (
     <div className="space-y-5">
@@ -1700,7 +1740,7 @@ const LeverageComplianceForm = ({ data, update, markManualNamePath = () => {} })
 
       <div className="section-header-light">ANNUAL INCOME FROM ALL SOURCES</div>
       <table className="kyc-table">
-        <thead><tr><th>Income Type</th><th>Annual Amount ($)</th><th>Monthly Income ($)</th></tr></thead>
+        <thead><tr><th>Income Type</th><th>Annual Amount ($)</th><th>Monthly Income ($) <span className="font-normal">(auto)</span></th></tr></thead>
         <tbody>
           {[
             ["empClient","Employment Client"],
@@ -1710,8 +1750,8 @@ const LeverageComplianceForm = ({ data, update, markManualNamePath = () => {} })
           ].map(([k,label]) => (
             <tr key={k}>
               <td>{label}</td>
-              <td><TextInput type="number" value={d.income[k]} onChange={v => setNested("income",k,v)}/></td>
-              <td><TextInput type="number" value={d.incomeMonthly[k]} onChange={v => setNested("incomeMonthly",k,v)}/></td>
+              <td><TextInput type="number" value={d.income[k]} onChange={v => setAnnualIncome(k, v)}/></td>
+              <td><ComputedCell value={fmt$(incomeSummary.monthlyByKey[k])}/></td>
             </tr>
           ))}
           {incomeOtherItems.map((row, i) => (
@@ -1720,7 +1760,7 @@ const LeverageComplianceForm = ({ data, update, markManualNamePath = () => {} })
               <td><TextInput type="number" value={row.annual} onChange={v => updateIncomeOther(i, "annual", v)}/></td>
               <td>
                 <div className="flex items-center gap-2">
-                  <TextInput type="number" value={row.monthly} onChange={v => updateIncomeOther(i, "monthly", v)}/>
+                  <div className="flex-1"><ComputedCell value={fmt$(row.monthly)}/></div>
                   <button type="button" className="px-2 py-1 border rounded text-xs text-gray-600" onClick={() => removeIncomeOther(i)} disabled={incomeOtherItems.length <= 1}>Remove</button>
                 </div>
               </td>
@@ -3637,12 +3677,12 @@ const LeverageKycPdf = ({ lc }) => (
       </PdfSection>
       <PdfSection title="Annual Income From All Sources">
         <PdfTable headers={["Income Type", "Annual ($)", "Monthly ($)"]} rows={[
-          ["Employment Client", fmtMoney(lc.income.empClient), fmtMoney(lc.incomeMonthly.empClient)],
-          ["Employment Joint Applicant", fmtMoney(lc.income.empJoint), fmtMoney(lc.incomeMonthly.empJoint)],
-          ["Investment", fmtMoney(lc.income.investment), fmtMoney(lc.incomeMonthly.investment)],
-          ["Rental", fmtMoney(lc.income.rental), fmtMoney(lc.incomeMonthly.rental)],
+          ["Employment Client", fmtMoney(lc.income.empClient), fmtMoney(monthlyIncomeFromAnnual(lc.income.empClient))],
+          ["Employment Joint Applicant", fmtMoney(lc.income.empJoint), fmtMoney(monthlyIncomeFromAnnual(lc.income.empJoint))],
+          ["Investment", fmtMoney(lc.income.investment), fmtMoney(monthlyIncomeFromAnnual(lc.income.investment))],
+          ["Rental", fmtMoney(lc.income.rental), fmtMoney(monthlyIncomeFromAnnual(lc.income.rental))],
           ...ensureRows(lc.income.otherItems, makeIncomeOtherRow).map(row => [row.label || "Other", fmtMoney(row.annual), fmtMoney(row.monthly)]),
-          [<b>Total</b>, <b>{fmtMoney(lc.income.totalAnnual)}</b>, <b>{fmtMoney(lc.income.totalMonthly)}</b>],
+          [<b>Total</b>, <b>{fmtMoney(calculateLeverageIncome(lc.income).totalAnnual)}</b>, <b>{fmtMoney(calculateLeverageIncome(lc.income).totalMonthly)}</b>],
         ]}/>
       </PdfSection>
     </PdfPage>
@@ -4795,9 +4835,9 @@ const drawAdvisorDisclosureVector = (w, ad, profile) => {
 const drawLeverageVector = (w, lc) => {
   const denseTable = { dense: true, noPageBreak: true };
   const income = lc.income || {};
-  const incomeMonthly = lc.incomeMonthly || {};
+  const incomeSummary = calculateLeverageIncome(income);
   const netWorth = lc.netWorth || {};
-  const incomeOtherRows = ensureRows(income.otherItems, makeIncomeOtherRow).filter(row => hasText(row.annual) || hasText(row.monthly) || (hasText(row.label) && row.label.trim().toLowerCase() !== "other"));
+  const incomeOtherRows = incomeSummary.otherItems.filter(row => hasText(row.annual) || (hasText(row.label) && row.label.trim().toLowerCase() !== "other"));
   const netOtherRows = ensureRows(netWorth.otherItems, makeNetWorthOtherRow).filter(row => hasText(row.client) || hasText(row.joint) || (hasText(row.label) && row.label.trim().toLowerCase() !== "other"));
   const debtRows = (lc.debt || []).filter(row => hasText(row.lender) || hasText(row.balance) || hasText(row.monthly));
   const compactSection = (title, fn) => {
@@ -4908,12 +4948,12 @@ const drawLeverageVector = (w, lc) => {
   w.section("Client Information", () => w.fields([["Last Name of Client", lc.clientLast], ["First Name of Client", lc.clientFirst], ["Last Name of Joint Client", lc.jointLast], ["First Name of Joint Client", lc.jointFirst], ["Leveraging", lc.leveragingType]], 2, { dense: true }), 10, { compact: true });
   w.section("Know-Your-Client (KYC)", () => w.fields([["Client Age", lc.clientAge], ["Joint Applicant Age", lc.jointAge], ["Client Knowledge", lc.clientKnowledge], ["Joint Applicant Knowledge", lc.jointKnowledge], ["Investment Objectives", lc.investmentObjectives], ["Time Horizon", lc.timeHorizon], ["Risk Tolerance - High %", lc.riskHigh], ["Medium %", lc.riskMedium], ["Low %", lc.riskLow]], 2, { dense: true }), 10, { compact: true });
   w.section("Annual Income From All Sources", () => w.table(["Income Type", "Annual ($)", "Monthly ($)"], pdfRows([
-    ["Employment Client", fmtMoney(income.empClient), fmtMoney(incomeMonthly.empClient)],
-    ["Employment Joint Applicant", fmtMoney(income.empJoint), fmtMoney(incomeMonthly.empJoint)],
-    ["Investment", fmtMoney(income.investment), fmtMoney(incomeMonthly.investment)],
-    ["Rental", fmtMoney(income.rental), fmtMoney(incomeMonthly.rental)],
+    ["Employment Client", fmtMoney(income.empClient), fmtMoney(incomeSummary.monthlyByKey.empClient)],
+    ["Employment Joint Applicant", fmtMoney(income.empJoint), fmtMoney(incomeSummary.monthlyByKey.empJoint)],
+    ["Investment", fmtMoney(income.investment), fmtMoney(incomeSummary.monthlyByKey.investment)],
+    ["Rental", fmtMoney(income.rental), fmtMoney(incomeSummary.monthlyByKey.rental)],
     ...incomeOtherRows.map(row => [row.label || "Other", fmtMoney(row.annual), fmtMoney(row.monthly)]),
-    ["Total", fmtMoney(income.totalAnnual), fmtMoney(income.totalMonthly)],
+    ["Total", fmtMoney(incomeSummary.totalAnnual), fmtMoney(incomeSummary.totalMonthly)],
   ]), null, denseTable), 10, { compact: true });
   w.finishPage();
 
