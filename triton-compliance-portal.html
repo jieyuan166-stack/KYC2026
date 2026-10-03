@@ -1044,8 +1044,11 @@ function normalizeFormData(formData) {
   }
 
   const iq = fd.segregatedFundInvestment?.insuranceQuestionnaire;
-  if (iq?.iaFinancial && shouldReplaceAdvisorValue(iq.iaFinancial.agentName)) {
-    iq.iaFinancial.agentName = profile.advisorName;
+  if (iq?.iaFinancial) {
+    iq.iaFinancial.skipForm = iq.iaFinancial.skipForm === true;
+    if (shouldReplaceAdvisorValue(iq.iaFinancial.agentName)) {
+      iq.iaFinancial.agentName = profile.advisorName;
+    }
   }
 
   const li = fd.lifeInsurance?.needsAnalysis;
@@ -1228,6 +1231,7 @@ const initialFormData = {
         advisorSignature: "", advisorDate: "",
       },
       iaFinancial: {
+        skipForm: false,
         applicationType: "", npNumber: "", existingContract: "",
         registrationType: {},
         lastFirstName: "", dateOfBirth: "", profession: "", employer: "", employerSince: "",
@@ -2225,12 +2229,42 @@ const IAFinancialQuestionnaire = ({ data, update, markManualNamePath = () => {} 
     "First Home Savings Account (FHSA)","Locked-In Retirement Account (LIRA)","Non-registered"
   ];
 
+  const pageHeader = (
+    <header className="text-center pb-3 border-b">
+      <div className="font-bold text-blue-800 text-xl">iA FINANCIAL</div>
+      <h2 className="text-2xl font-bold text-navy mt-1">Your investor profile (F51-122A)</h2>
+    </header>
+  );
+  const skipControl = (
+    <div className="border border-[#C9A961] bg-[#FAFAF6] rounded p-4">
+      <Checkbox
+        checked={d.skipForm === true}
+        onChange={value => set("skipForm", value)}
+        label="Skip this form - iA FINANCIAL will generate the Investor Profile automatically."
+      />
+      <div className="mt-2 text-xs text-gray-600">
+        When selected, this questionnaire will be omitted from the exported PDF and retained separately through iA FINANCIAL.
+      </div>
+    </div>
+  );
+
+  if (d.skipForm === true) {
+    return (
+      <div className="space-y-5">
+        {pageHeader}
+        {skipControl}
+        <div className="border-l-4 border-blue-700 bg-blue-50 p-4">
+          <div className="font-semibold text-navy">iA Investor Profile skipped</div>
+          <div className="mt-1 text-sm text-gray-700">The Investor Profile will be generated separately by iA FINANCIAL and will not be included in this PDF package.</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
-      <header className="text-center pb-3 border-b">
-        <div className="font-bold text-blue-800 text-xl">iA FINANCIAL</div>
-        <h2 className="text-2xl font-bold text-navy mt-1">Your investor profile (F51-122A)</h2>
-      </header>
+      {pageHeader}
+      {skipControl}
 
       <Field label="Application Type">
         <RadioGroup vertical={false} name="appType" value={d.applicationType} onChange={v=>set("applicationType",v)} options={["New application for an Annuity Contract","Existing Annuity Contract"]}/>
@@ -3904,7 +3938,7 @@ const ManulifeQpdf = ({ q }) => (
   </>
 );
 
-const IAQpdf = ({ q }) => (
+const IAQpdf = ({ q }) => q?.skipForm ? null : (
   <>
     <PdfPage>
       <PdfHeader title="iA FINANCIAL  -  Your Investor Profile" subtitle="F51-122A" pageLabel="iA FINANCIAL Questionnaire" />
@@ -4230,7 +4264,7 @@ const PrintableDocument = ({ data }) => {
       {isSegFund && sf.leverageLoan === "yes" && <LeverageKycPdf lc={sf.leverageCompliance}/>}
       {isSegFund && sf.leverageLoan === "no"  && <NonLeveragePdf  nl={sf.nonLeverageCompliance}/>}
       {isSegFund && ic === "Manulife"      && <ManulifeQpdf    q={sf.insuranceQuestionnaire.manulife}/>}
-      {isSegFund && ic === "iA Financial"  && <IAQpdf          q={sf.insuranceQuestionnaire.iaFinancial}/>}
+      {isSegFund && ic === "iA Financial" && !sf.insuranceQuestionnaire.iaFinancial?.skipForm && <IAQpdf q={sf.insuranceQuestionnaire.iaFinancial}/>}
       {isSegFund && ic === "Canada Life"   && <CanadaLifeQpdf  q={sf.insuranceQuestionnaire.canadaLife}/>}
       {isSegFund && ic === "Equitable Life"&& <EquitableQpdf   q={sf.insuranceQuestionnaire.equitableLife}/>}
       {isSegFund && !hasReasonWhyAttachment && rw.accountType && <ReasonWhyPdf data={data}/>}
@@ -5336,7 +5370,7 @@ const drawInsuranceQuestionnaireVector = (w, sf) => {
     w.section("Signatures", () => drawQuestionnaireSignatures(w, [[`${m.firstName || ""} ${m.surname || ""}`.trim(), "Client"], [w.profile.advisorName, "Advisor"]]), 12, { compact: true });
     w.finishPage();
   }
-  if (sf.selectedInsuranceCompany === "iA Financial") {
+  if (sf.selectedInsuranceCompany === "iA Financial" && !q.iaFinancial?.skipForm) {
     const ia = q.iaFinancial || {};
     const score = questionnaireScore(iaQuestions, ia);
     const profile = score === 0 ? "" : score <= 26 ? "Prudent" : score <= 55 ? "Moderate" : score <= 89 ? "Balanced" : score <= 119 ? "Growth" : "Aggressive";
@@ -5827,7 +5861,7 @@ const collectMissingItems = (data) => {
       addMissing(items, "Manulife Questionnaire", "Date Completed", m.dateCompleted);
       questionnaireMissing(items, "Manulife Questionnaire", manulifeQuestions, m);
     }
-    if (sf.selectedInsuranceCompany === "iA Financial") {
+    if (sf.selectedInsuranceCompany === "iA Financial" && !q.iaFinancial?.skipForm) {
       const ia = q.iaFinancial || {};
       addMissing(items, "iA FINANCIAL Questionnaire", "Last and First Name", ia.lastFirstName);
       addMissing(items, "iA FINANCIAL Questionnaire", "Date of Birth", ia.dateOfBirth);
@@ -6499,7 +6533,10 @@ const ReviewAndGeneratePDF = ({ data, goToStep, update }) => {
         {isSegFund && (
           <ReviewPanel title={`4. Insurance Company Questionnaire  -  ${sf.selectedInsuranceCompany === "iA Financial" ? "iA FINANCIAL" : (sf.selectedInsuranceCompany || " - ")}`}>
             {sf.selectedInsuranceCompany === "Manulife" && <ManulifeReview d={sf.insuranceQuestionnaire.manulife}/>}
-            {sf.selectedInsuranceCompany === "iA Financial" && <IAReview d={sf.insuranceQuestionnaire.iaFinancial} profile={profile}/>}
+            {sf.selectedInsuranceCompany === "iA Financial" && sf.insuranceQuestionnaire.iaFinancial?.skipForm && (
+              <ReviewSummaryRow label="iA Investor Profile" value="Skipped - generated separately by iA FINANCIAL"/>
+            )}
+            {sf.selectedInsuranceCompany === "iA Financial" && !sf.insuranceQuestionnaire.iaFinancial?.skipForm && <IAReview d={sf.insuranceQuestionnaire.iaFinancial} profile={profile}/>}
             {sf.selectedInsuranceCompany === "Canada Life" && <CanadaLifeReview d={sf.insuranceQuestionnaire.canadaLife}/>}
             {sf.selectedInsuranceCompany === "Equitable Life" && <EquitableReview d={sf.insuranceQuestionnaire.equitableLife}/>}
           </ReviewPanel>
